@@ -1,0 +1,6 @@
+{
+  "id": "EPIC-002",
+  "title": "Refine validation for alternate request path",
+  "description": "Customers need the alternate request path to validate additional input before processing. The system must reject invalid requests early, but all valid existing scenarios should still behave exactly as before. We need a clear description of which validation logic should move and which files are likely impacted.",
+  "whatToDo": "**What to do:**\n\n1. **If the request enters the alternate path:**\n   - Add the new validation checks before the processing step starts.\n   - Return the existing failure response when validation does not pass.\n2. **Else (all other cases):**\n   - Preserve the current request flow and result handling.\n\n**Files to change:**\n\n- `src/validation/alternate_validator.cpp` — add the new validation branch for the alternate path.\n- `src/feature/handler.cpp` — wire the validator into the request flow.\n- `tests/validation/alternate_validator_test.cpp` — cover both valid and invalid scenarios."
+}

@@ -1,0 +1,112 @@
+body {
+  margin: 0;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  color: #11212d;
+  background: linear-gradient(180deg, #eef6f3 0%, #d8e5e0 100%);
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 24px 32px;
+  background: #133c55;
+  color: #f4fbf8;
+}
+
+.topbar h1,
+.topbar p {
+  margin: 0;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.controls select,
+.controls button,
+.button-row button,
+#refineButton {
+  border: 0;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font: inherit;
+}
+
+.controls button,
+.button-row button,
+#refineButton {
+  background: #5c7457;
+  color: #fff;
+  cursor: pointer;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: 1fr 1.1fr 1fr;
+  gap: 16px;
+  padding: 20px;
+}
+
+.panel {
+  min-height: 75vh;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(19, 60, 85, 0.12);
+  border-radius: 18px;
+  padding: 18px;
+  box-shadow: 0 10px 30px rgba(17, 33, 45, 0.08);
+}
+
+.panel h2,
+.panel h3 {
+  margin-top: 0;
+}
+
+.content,
+.editor {
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 12px;
+  border: 1px solid #d1ddd8;
+  background: #f9fcfb;
+  padding: 12px;
+  font: 14px/1.5 "IBM Plex Mono", "SFMono-Regular", monospace;
+}
+
+.content {
+  white-space: pre-wrap;
+  min-height: 120px;
+}
+
+.editor {
+  min-height: 420px;
+  resize: vertical;
+}
+
+.editor.short {
+  min-height: 100px;
+}
+
+.list {
+  padding-left: 18px;
+}
+
+.list li {
+  margin-bottom: 10px;
+}
+
+.button-row {
+  margin-top: 12px;
+}
+
+@media (max-width: 1100px) {
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .panel {
+    min-height: auto;
+  }
+}

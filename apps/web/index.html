@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Offline Epic What-to-Do Workbench</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>Epic What-to-Do Workbench</h1>
+        <p>Offline MVP for description -> evidence -> draft -> refine.</p>
+      </div>
+      <div class="controls">
+        <select id="epicSelect"></select>
+        <button id="loadButton">Generate</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="panel">
+        <h2>Epic Context</h2>
+        <pre id="description" class="content"></pre>
+        <h3>Retrieval Intent</h3>
+        <pre id="intent" class="content"></pre>
+      </section>
+
+      <section class="panel">
+        <h2>Generated What to Do</h2>
+        <textarea id="draftEditor" class="editor"></textarea>
+        <div class="button-row">
+          <button id="confirmButton">Confirm</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Evidence</h2>
+        <ul id="evidenceList" class="list"></ul>
+        <h3>Open Questions</h3>
+        <ul id="questionList" class="list"></ul>
+        <textarea id="refineInput" class="editor short" placeholder="Add reviewer guidance or answer a question..."></textarea>
+        <button id="refineButton">Refine</button>
+        <h3>Ground Truth</h3>
+        <pre id="groundTruth" class="content"></pre>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

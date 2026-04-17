@@ -1,0 +1,6 @@
+{
+  "id": "EPIC-001",
+  "title": "Support conditional processing for feature flow",
+  "description": "From customer point of view the feature should apply the new processing flow only when the request matches the new condition. In all other cases the current behavior must remain unchanged. The implementation should be discoverable from the existing feature handling path and keep regression coverage for the fallback flow.",
+  "whatToDo": "**What to do:**\n\n1. **If request matches the new condition:**\n   - Update the feature handling path to execute the new processing logic.\n   - Ensure the decision is explicitly guarded so other requests do not enter the new flow.\n2. **Else (all other cases):**\n   - Keep current behavior and fallback handling unchanged.\n\n**Files to change:**\n\n- `src/feature/handler.cpp` — adjust the main request handling branch.\n- `include/feature/config.h` — expose the guard or configuration used by the new path.\n- `tests/feature/handler_test.cpp` — add coverage for the new branch and preserve regression checks."
+}

@@ -1,0 +1,2 @@
+# This offline MVP currently uses Python standard library only.
+# Keep this file so setup commands remain consistent across platforms.
