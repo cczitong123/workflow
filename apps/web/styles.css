@@ -1,3 +1,9 @@
+:root {
+  --left-panel-width: 30%;
+  --right-panel-width: 28%;
+  --handle-width: 10px;
+}
+
 body {
   margin: 0;
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
@@ -45,18 +51,54 @@ body {
 
 .workspace {
   display: grid;
-  grid-template-columns: 1fr 1.1fr 1fr;
-  gap: 16px;
+  grid-template-columns:
+    minmax(240px, var(--left-panel-width))
+    var(--handle-width)
+    minmax(320px, 1fr)
+    var(--handle-width)
+    minmax(260px, var(--right-panel-width));
+  gap: 12px;
   padding: 20px;
+  align-items: start;
 }
 
 .panel {
   min-height: 75vh;
+  min-width: 0;
   background: rgba(255, 255, 255, 0.82);
   border: 1px solid rgba(19, 60, 85, 0.12);
   border-radius: 18px;
   padding: 18px;
   box-shadow: 0 10px 30px rgba(17, 33, 45, 0.08);
+  overflow: hidden;
+}
+
+.resize-handle {
+  width: var(--handle-width);
+  min-height: 75vh;
+  justify-self: stretch;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(19, 60, 85, 0.18) 0%, rgba(92, 116, 87, 0.32) 100%);
+  border: 1px solid rgba(19, 60, 85, 0.1);
+  cursor: col-resize;
+  position: relative;
+}
+
+.resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 56px;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: rgba(19, 60, 85, 0.42);
+}
+
+.resize-handle:hover,
+.resize-handle.is-active {
+  background: linear-gradient(180deg, rgba(19, 60, 85, 0.28) 0%, rgba(92, 116, 87, 0.45) 100%);
 }
 
 .panel h2,
@@ -67,6 +109,7 @@ body {
 .content,
 .editor {
   width: 100%;
+  max-width: 100%;
   box-sizing: border-box;
   border-radius: 12px;
   border: 1px solid #d1ddd8;
@@ -77,12 +120,17 @@ body {
 
 .content {
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   min-height: 120px;
+  max-height: 260px;
+  overflow: auto;
 }
 
 .editor {
   min-height: 420px;
   resize: vertical;
+  overflow: auto;
 }
 
 .editor.short {
@@ -91,6 +139,8 @@ body {
 
 .list {
   padding-left: 18px;
+  max-height: 220px;
+  overflow: auto;
 }
 
 .list li {
@@ -108,5 +158,9 @@ body {
 
   .panel {
     min-height: auto;
+  }
+
+  .resize-handle {
+    display: none;
   }
 }

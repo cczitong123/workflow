@@ -18,15 +18,23 @@
       </div>
     </header>
 
-    <main class="workspace">
-      <section class="panel">
+    <main class="workspace" id="workspace">
+      <section class="panel" data-panel="left">
         <h2>Epic Context</h2>
         <pre id="description" class="content"></pre>
         <h3>Retrieval Intent</h3>
         <pre id="intent" class="content"></pre>
       </section>
 
-      <section class="panel">
+      <div
+        class="resize-handle"
+        data-resize-handle="left"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize left panel"
+      ></div>
+
+      <section class="panel" data-panel="center">
         <h2>Generated What to Do</h2>
         <textarea id="draftEditor" class="editor"></textarea>
         <div class="button-row">
@@ -34,14 +42,22 @@
         </div>
       </section>
 
-      <section class="panel">
+      <div
+        class="resize-handle"
+        data-resize-handle="right"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize right panel"
+      ></div>
+
+      <section class="panel" data-panel="right">
         <h2>Evidence</h2>
         <ul id="evidenceList" class="list"></ul>
         <h3>Open Questions</h3>
         <ul id="questionList" class="list"></ul>
         <textarea id="refineInput" class="editor short" placeholder="Add reviewer guidance or answer a question..."></textarea>
         <button id="refineButton">Refine</button>
-        <h3>Ground Truth</h3>
+        <h3>Historical What-to-Do</h3>
         <pre id="groundTruth" class="content"></pre>
       </section>
     </main>

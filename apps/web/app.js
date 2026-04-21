@@ -1,5 +1,6 @@
 let currentSessionId = null;
 let currentDraft = null;
+const PANEL_STORAGE_KEY = "bmwcode-workspace-widths";
 
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, {
@@ -10,6 +11,77 @@ async function fetchJson(url, options = {}) {
     throw new Error(`Request failed: ${response.status}`);
   }
   return response.json();
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function loadSavedPanelWidths() {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(PANEL_STORAGE_KEY) || "{}");
+    if (saved.left) {
+      document.documentElement.style.setProperty("--left-panel-width", saved.left);
+    }
+    if (saved.right) {
+      document.documentElement.style.setProperty("--right-panel-width", saved.right);
+    }
+  } catch (_error) {
+    // Ignore malformed saved layout state.
+  }
+}
+
+function savePanelWidths(leftPercent, rightPercent) {
+  window.localStorage.setItem(
+    PANEL_STORAGE_KEY,
+    JSON.stringify({
+      left: `${leftPercent}%`,
+      right: `${rightPercent}%`,
+    }),
+  );
+}
+
+function setupResizablePanels() {
+  const workspace = document.getElementById("workspace");
+  const handles = document.querySelectorAll("[data-resize-handle]");
+  if (!workspace || window.innerWidth <= 1100) {
+    return;
+  }
+
+  handles.forEach((handle) => {
+    handle.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      const activeHandle = event.currentTarget;
+      const workspaceRect = workspace.getBoundingClientRect();
+      activeHandle.classList.add("is-active");
+      activeHandle.setPointerCapture(event.pointerId);
+
+      const onPointerMove = (moveEvent) => {
+        const relativeX = moveEvent.clientX - workspaceRect.left;
+        const leftPercent = clamp((relativeX / workspaceRect.width) * 100, 20, 55);
+        const rightPercent = clamp(((workspaceRect.right - moveEvent.clientX) / workspaceRect.width) * 100, 20, 45);
+
+        if (activeHandle.dataset.resizeHandle === "left") {
+          document.documentElement.style.setProperty("--left-panel-width", `${leftPercent}%`);
+          savePanelWidths(leftPercent, parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--right-panel-width")));
+        } else {
+          document.documentElement.style.setProperty("--right-panel-width", `${rightPercent}%`);
+          savePanelWidths(parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--left-panel-width")), rightPercent);
+        }
+      };
+
+      const stopDragging = () => {
+        activeHandle.classList.remove("is-active");
+        activeHandle.removeEventListener("pointermove", onPointerMove);
+        activeHandle.removeEventListener("pointerup", stopDragging);
+        activeHandle.removeEventListener("pointercancel", stopDragging);
+      };
+
+      activeHandle.addEventListener("pointermove", onPointerMove);
+      activeHandle.addEventListener("pointerup", stopDragging);
+      activeHandle.addEventListener("pointercancel", stopDragging);
+    });
+  });
 }
 
 function renderEvidence(items) {
@@ -116,6 +188,8 @@ document.getElementById("loadButton").addEventListener("click", generate);
 document.getElementById("refineButton").addEventListener("click", refine);
 document.getElementById("confirmButton").addEventListener("click", confirmDraft);
 
+loadSavedPanelWidths();
+setupResizablePanels();
 loadEpics().catch((error) => {
   document.getElementById("description").textContent = error.message;
 });
