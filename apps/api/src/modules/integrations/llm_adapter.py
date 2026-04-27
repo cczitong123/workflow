@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import json
+import re
+
 from config import LlmApiConfig
+from prompt_loader import load_fewshot_examples, load_prompt_text
 from modules.shared.models import (
     EvidenceItem,
     FileChange,
@@ -136,9 +140,17 @@ def _build_local_intent(description: str, config: LlmApiConfig) -> tuple[str, st
 
 
 def _build_remote_intent(description: str, config: LlmApiConfig) -> tuple[str, str, list[str], list[str]]:
-    raise NotImplementedError(
-        "Remote LLM mode is selected, but the remote HTTP client is not implemented yet. "
-        "Use config.endpoint, config.model, and auth fields in this file."
+    prompt = load_prompt_text("retrieval_intent_system").format(
+        description=description,
+        fewshot=json.dumps(load_fewshot_examples("retrieval_intent_fewshot"), ensure_ascii=False, indent=2),
+    )
+    payload = _call_remote_chat(prompt, config)
+    data = _parse_json_response(payload)
+    return (
+        str(data.get("summary", "")),
+        str(data.get("technical_intent", "")),
+        [str(item) for item in data.get("keywords", [])],
+        [str(item) for item in data.get("suspected_areas", [])],
     )
 
 
@@ -159,9 +171,15 @@ def _generate_remote_draft(
     references: list[ParsedWhatToDo],
     config: LlmApiConfig,
 ) -> WhatToDoDraft:
-    raise NotImplementedError(
-        "Remote LLM mode is selected, but remote draft generation is not implemented yet."
+    prompt = load_prompt_text("draft_generation_system").format(
+        description=description,
+        evidence=json.dumps([_evidence_to_prompt(item) for item in evidence], ensure_ascii=False, indent=2),
+        references=json.dumps([_reference_to_prompt(item) for item in references], ensure_ascii=False, indent=2),
+        fewshot=json.dumps(load_fewshot_examples("draft_generation_fewshot"), ensure_ascii=False, indent=2),
     )
+    payload = _call_remote_chat(prompt, config)
+    data = _parse_json_response(payload)
+    return _draft_from_json(data, version=1)
 
 
 def _refine_mock_draft(
@@ -214,9 +232,15 @@ def _refine_remote_draft(
     answered_questions: list[dict[str, str]],
     config: LlmApiConfig,
 ) -> WhatToDoDraft:
-    raise NotImplementedError(
-        "Remote LLM mode is selected, but remote refine is not implemented yet."
+    prompt = load_prompt_text("refine_open_questions_system").format(
+        current_draft=json.dumps(_draft_to_prompt(current), ensure_ascii=False, indent=2),
+        user_message=user_message,
+        answered_questions=json.dumps(answered_questions, ensure_ascii=False, indent=2),
+        fewshot=json.dumps(load_fewshot_examples("refine_open_questions_fewshot"), ensure_ascii=False, indent=2),
     )
+    payload = _call_remote_chat(prompt, config)
+    data = _parse_json_response(payload)
+    return _draft_from_json(data, version=current.version + 1)
 
 
 def _render_draft(steps: list[Step], files_to_change: list[FileChange]) -> str:
@@ -229,3 +253,150 @@ def _render_draft(steps: list[Step], files_to_change: list[FileChange]) -> str:
     for item in files_to_change:
         lines.append(f"- `{item.path}` — {item.reason}")
     return "\n".join(lines)
+
+
+def _call_remote_chat(prompt: str, config: LlmApiConfig) -> str:
+    try:
+        import httpx
+    except ImportError as exc:
+        raise RuntimeError(
+            "Remote LLM mode requires httpx. Install dependencies with `python -m pip install -r requirements.txt`."
+        ) from exc
+
+    access_token = config.access_token or _get_access_token(config, httpx)
+    url = f"{config.endpoint.rstrip('/')}{config.api_path}"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "x-apikey": config.api_key,
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": config.model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": config.temperature,
+        "max_tokens": config.max_tokens,
+        "top_p": config.top_p,
+        "presence_penalty": config.presence_penalty,
+        "frequency_penalty": config.frequency_penalty,
+    }
+    client_kwargs = {"timeout": config.timeout_seconds}
+    if config.cert_path:
+        client_kwargs["verify"] = config.cert_path
+
+    with httpx.Client(**client_kwargs) as client:
+        response = client.post(url, headers=headers, json=payload)
+        response.raise_for_status()
+        body = response.json()
+    try:
+        return body["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError(f"Unexpected LLM response shape: {body}") from exc
+
+
+def _get_access_token(config: LlmApiConfig, httpx_module) -> str:
+    if not config.client_id or not config.client_secret or not config.auth_url:
+        raise RuntimeError(
+            "Remote LLM mode requires either BMWCODE_LLM_ACCESS_TOKEN or the full M2M config: "
+            "BMWCODE_LLM_AUTH_URL, BMWCODE_LLM_CLIENT_ID, BMWCODE_LLM_CLIENT_SECRET."
+        )
+    data = {
+        "grant_type": "client_credentials",
+        "client_id": config.client_id,
+        "client_secret": config.client_secret,
+        "scope": "machine2machine",
+    }
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    client_kwargs = {"timeout": min(config.timeout_seconds, 30)}
+    if config.cert_path:
+        client_kwargs["verify"] = config.cert_path
+
+    with httpx_module.Client(**client_kwargs) as client:
+        response = client.post(config.auth_url, headers=headers, data=data)
+        response.raise_for_status()
+        token = response.json().get("access_token")
+    if not token:
+        raise RuntimeError("Empty access_token from M2M auth response.")
+    return token
+
+
+def _parse_json_response(text: str) -> dict:
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"```json\s*(\{.*\})\s*```", text, re.DOTALL)
+        if match:
+            return json.loads(match.group(1))
+    raise RuntimeError(f"LLM response is not valid JSON: {text}")
+
+
+def _draft_from_json(data: dict, version: int) -> WhatToDoDraft:
+    steps = [
+        Step(
+            condition=str(item.get("condition", "")),
+            actions=[str(action) for action in item.get("actions", [])],
+        )
+        for item in data.get("steps", [])
+    ]
+    files_to_change = [
+        FileChange(path=str(item.get("path", "")), reason=str(item.get("reason", "")))
+        for item in data.get("files_to_change", [])
+    ]
+    open_questions = [
+        OpenQuestion(
+            id=str(item.get("id", f"oq-{index + 1}")),
+            question=str(item.get("question", "")),
+            reason=str(item.get("reason", "")),
+            status=str(item.get("status", "open")),
+            answer=item.get("answer"),
+        )
+        for index, item in enumerate(data.get("open_questions", []))
+    ]
+    return WhatToDoDraft(
+        version=version,
+        steps=steps,
+        files_to_change=files_to_change,
+        open_questions=open_questions,
+        raw_text=_render_draft(steps, files_to_change),
+        summary=str(data.get("summary", "")),
+    )
+
+
+def _evidence_to_prompt(item: EvidenceItem) -> dict:
+    return {
+        "path": item.path,
+        "symbol": item.symbol,
+        "why_relevant": item.why_relevant,
+        "suggested_change": item.suggested_change,
+        "location_hint": item.location_hint,
+    }
+
+
+def _reference_to_prompt(item: ParsedWhatToDo) -> dict:
+    return {
+        "steps": [{"condition": step.condition, "actions": step.actions} for step in item.steps],
+        "files_to_change": [
+            {"path": file_change.path, "reason": file_change.reason}
+            for file_change in item.files_to_change
+        ],
+    }
+
+
+def _draft_to_prompt(draft: WhatToDoDraft) -> dict:
+    return {
+        "version": draft.version,
+        "steps": [{"condition": step.condition, "actions": step.actions} for step in draft.steps],
+        "files_to_change": [
+            {"path": item.path, "reason": item.reason} for item in draft.files_to_change
+        ],
+        "open_questions": [
+            {
+                "id": item.id,
+                "question": item.question,
+                "reason": item.reason,
+                "status": item.status,
+                "answer": item.answer,
+            }
+            for item in draft.open_questions
+        ],
+        "summary": draft.summary,
+    }

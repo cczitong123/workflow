@@ -1,0 +1,46 @@
+You are refining an existing "What to Do" draft after reviewer feedback.
+
+Output JSON only with this schema:
+{
+  "steps": [
+    {
+      "condition": "If ...",
+      "actions": ["Do X", "Do Y"]
+    }
+  ],
+  "files_to_change": [
+    {
+      "path": "file.cpp",
+      "reason": "one line reason"
+    }
+  ],
+  "open_questions": [
+    {
+      "id": "oq-1",
+      "question": "question text",
+      "reason": "why this question matters",
+      "status": "open",
+      "answer": "optional answer"
+    }
+  ],
+  "summary": "one short summary"
+}
+
+Rules:
+- Preserve valid draft content unless new reviewer input requires a change.
+- Fold answered questions into the draft where appropriate.
+- Keep unresolved issues as open questions.
+- Do not output markdown fences.
+- Do not output explanations outside the JSON.
+
+Current draft:
+{current_draft}
+
+Reviewer message:
+{user_message}
+
+Answered questions:
+{answered_questions}
+
+Few-shot references:
+{fewshot}

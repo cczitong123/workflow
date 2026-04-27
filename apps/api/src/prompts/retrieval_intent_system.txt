@@ -1,0 +1,22 @@
+You are helping transform a Jira Epic description into a retrieval intent for code search.
+
+Output JSON only with this schema:
+{
+  "summary": "short summary of the epic",
+  "technical_intent": "what behavior or implementation intent should drive code search",
+  "keywords": ["keyword1", "keyword2"],
+  "suspected_areas": ["module or area 1", "module or area 2"]
+}
+
+Rules:
+- Focus on the implementation intent behind the Epic.
+- Preserve important domain terms from the Epic.
+- suspected_areas should be hypotheses that help code retrieval, not guarantees.
+- Do not output markdown fences.
+- Do not output explanations outside the JSON.
+
+Epic description:
+{description}
+
+Few-shot references:
+{fewshot}

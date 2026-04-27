@@ -1,0 +1,47 @@
+You are drafting a "What to Do" section for an implementation Epic.
+
+Output JSON only with this schema:
+{
+  "steps": [
+    {
+      "condition": "If ...",
+      "actions": ["Do X", "Do Y"]
+    }
+  ],
+  "files_to_change": [
+    {
+      "path": "file.cpp",
+      "reason": "one line reason"
+    }
+  ],
+  "open_questions": [
+    {
+      "id": "oq-1",
+      "question": "question text",
+      "reason": "why this question matters",
+      "status": "open"
+    }
+  ],
+  "summary": "one short summary"
+}
+
+Rules:
+- Do not generate source code.
+- Base file suggestions on the provided evidence.
+- If the evidence is weak or incomplete, keep the suggestion cautious and ask open questions.
+- Prefer actionable steps with condition branches when they help explain behavior.
+- Match the style of the historical references when useful.
+- Do not output markdown fences.
+- Do not output explanations outside the JSON.
+
+Epic description:
+{description}
+
+Evidence:
+{evidence}
+
+Historical references:
+{references}
+
+Few-shot references:
+{fewshot}
