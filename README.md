@@ -1,4 +1,4 @@
-# BMWcode
+# workflow
 
 This repository contains an Epic analysis workbench. Local Epic JSON files are read, retrieval intent is produced from Epic descriptions, code evidence is retrieved from a local vector store, and a `What to Do` draft with open questions is generated and refined in a web UI.
 
