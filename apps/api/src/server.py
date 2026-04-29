@@ -29,6 +29,10 @@ WEB_DIR = DEFAULT_WEB_DIR
 APP_CONFIG: AppConfig | None = None
 
 
+def log_event(scope: str, message: str) -> None:
+    print(f"[AGENTIC-WORKFLOW][{scope}] {message}", flush=True)
+
+
 class AppHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if EPICS is None:
@@ -82,107 +86,142 @@ class AppHandler(BaseHTTPRequestHandler):
             return
         parsed = urlparse(self.path)
         payload = self._read_json()
+        log_event("HTTP", f"POST {parsed.path} received")
 
-        if parsed.path == "/api/sessions":
-            epic_id = payload["epicId"]
-            record = EPICS.get_epic(epic_id)
-            session = SESSIONS.create(
-                epic_id=record.source.id,
-                title=record.source.title,
-                description=record.source.description,
-            )
-            self._json({"sessionId": session.id})
-            return
-
-        if parsed.path.endswith("/generate"):
-            session_id = parsed.path.split("/")[-2]
-            session = SESSIONS.get(session_id)
-            if APP_CONFIG is None:
-                self._json({"error": "Application config is not loaded."}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+        try:
+            if parsed.path == "/api/sessions":
+                epic_id = payload["epicId"]
+                log_event("SESSION", f"Creating session for epic={epic_id}")
+                record = EPICS.get_epic(epic_id)
+                session = SESSIONS.create(
+                    epic_id=record.source.id,
+                    title=record.source.title,
+                    description=record.source.description,
+                )
+                log_event("SESSION", f"Session created id={session.id}")
+                self._json({"sessionId": session.id})
                 return
-            summary, technical_intent, keywords, suspected_areas = build_retrieval_intent(
-                session.input_description,
-                APP_CONFIG.llm_api,
-            )
-            intent = RetrievalIntent(
-                summary=summary,
-                technical_intent=technical_intent,
-                keywords=keywords,
-                suspected_areas=suspected_areas,
-            )
-            evidence = retrieve_code_evidence(intent, APP_CONFIG.code_rag)
-            reference_records = [
-                record.parsed_what_to_do
-                for record in EPICS.list_epics()
-                if record.source.id != session.epic_id and record.parsed_what_to_do is not None
-            ]
-            references = [record for record in reference_records if record.steps or record.files_to_change][:3]
-            draft = generate_draft(
-                session.input_description,
-                evidence,
-                references,
-                APP_CONFIG.llm_api,
-            )
-            session.retrieval_intent = intent
-            session.evidence = evidence
-            session.reference_samples = references
-            session.draft = draft
-            session.draft_history.append(draft)
-            session.status = "generated"
 
-            ground_truth = EPICS.get_epic(session.epic_id).parsed_what_to_do
+            if parsed.path.endswith("/generate"):
+                session_id = parsed.path.split("/")[-2]
+                session = SESSIONS.get(session_id)
+                log_event("GENERATE", f"Session {session_id} started for epic={session.epic_id}")
+                if APP_CONFIG is None:
+                    self._json({"error": "Application config is not loaded."}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                    return
+
+                log_event("STEP-1", "Building retrieval intent")
+                summary, technical_intent, keywords, suspected_areas = build_retrieval_intent(
+                    session.input_description,
+                    APP_CONFIG.llm_api,
+                )
+                intent = RetrievalIntent(
+                    summary=summary,
+                    technical_intent=technical_intent,
+                    keywords=keywords,
+                    suspected_areas=suspected_areas,
+                )
+                log_event(
+                    "STEP-1",
+                    f"Retrieval intent ready. keywords={len(keywords)} suspected_areas={len(suspected_areas)}",
+                )
+
+                log_event("STEP-2", "Retrieving code evidence")
+                evidence = retrieve_code_evidence(intent, APP_CONFIG.code_rag)
+                log_event("STEP-2", f"Code evidence ready. items={len(evidence)}")
+
+                log_event("STEP-3", "Collecting historical references")
+                reference_records = [
+                    record.parsed_what_to_do
+                    for record in EPICS.list_epics()
+                    if record.source.id != session.epic_id and record.parsed_what_to_do is not None
+                ]
+                references = [record for record in reference_records if record.steps or record.files_to_change][:3]
+                log_event("STEP-3", f"Historical references ready. items={len(references)}")
+
+                log_event("STEP-4", "Generating draft")
+                draft = generate_draft(
+                    session.input_description,
+                    evidence,
+                    references,
+                    APP_CONFIG.llm_api,
+                )
+                log_event("STEP-4", f"Draft generated. steps={len(draft.steps)} files={len(draft.files_to_change)}")
+
+                session.retrieval_intent = intent
+                session.evidence = evidence
+                session.reference_samples = references
+                session.draft = draft
+                session.draft_history.append(draft)
+                session.status = "generated"
+
+                ground_truth = EPICS.get_epic(session.epic_id).parsed_what_to_do
+                log_event("GENERATE", f"Session {session_id} completed successfully")
+                self._json(
+                    {
+                        "sessionId": session.id,
+                        "retrievalIntent": to_dict(intent),
+                        "evidence": to_dict(evidence),
+                        "referenceSamples": to_dict(references),
+                        "draft": to_dict(draft),
+                        "groundTruth": to_dict(ground_truth),
+                    }
+                )
+                return
+
+            if parsed.path.endswith("/refine"):
+                session_id = parsed.path.split("/")[-2]
+                session = SESSIONS.get(session_id)
+                log_event("REFINE", f"Session {session_id} refine started")
+                if session.draft is None:
+                    self._json({"error": "Draft not generated yet."}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                if APP_CONFIG is None:
+                    self._json({"error": "Application config is not loaded."}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                    return
+                user_message = payload.get("userMessage", "")
+                answered = payload.get("answeredQuestions", [])
+                draft = refine_draft(session.draft, user_message, answered, APP_CONFIG.llm_api)
+                session.draft = draft
+                session.draft_history.append(draft)
+                session.status = "refining"
+                log_event("REFINE", f"Session {session_id} refine completed. version={draft.version}")
+                self._json(
+                    {
+                        "draft": to_dict(draft),
+                        "diffSummary": [
+                            "Appended reviewer guidance as an extra action block.",
+                            "Marked answered questions and preserved unresolved ones.",
+                        ],
+                    }
+                )
+                return
+
+            if parsed.path.endswith("/confirm"):
+                session_id = parsed.path.split("/")[-2]
+                session = SESSIONS.get(session_id)
+                session.status = "confirmed"
+                log_event("CONFIRM", f"Session {session_id} confirmed")
+                self._json(
+                    {
+                        "sessionId": session.id,
+                        "finalDraft": to_dict(session.draft),
+                        "exportText": session.draft.raw_text if session.draft else "",
+                    }
+                )
+                return
+
+            self.send_error(HTTPStatus.NOT_FOUND)
+        except Exception as exc:
+            log_event("ERROR", f"{parsed.path} failed with {type(exc).__name__}: {exc}")
             self._json(
                 {
-                    "sessionId": session.id,
-                    "retrievalIntent": to_dict(intent),
-                    "evidence": to_dict(evidence),
-                    "referenceSamples": to_dict(references),
-                    "draft": to_dict(draft),
-                    "groundTruth": to_dict(ground_truth),
-                }
+                    "error": str(exc),
+                    "type": type(exc).__name__,
+                    "path": parsed.path,
+                },
+                status=HTTPStatus.INTERNAL_SERVER_ERROR,
             )
-            return
-
-        if parsed.path.endswith("/refine"):
-            session_id = parsed.path.split("/")[-2]
-            session = SESSIONS.get(session_id)
-            if session.draft is None:
-                self._json({"error": "Draft not generated yet."}, status=HTTPStatus.BAD_REQUEST)
-                return
-            if APP_CONFIG is None:
-                self._json({"error": "Application config is not loaded."}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
-                return
-            user_message = payload.get("userMessage", "")
-            answered = payload.get("answeredQuestions", [])
-            draft = refine_draft(session.draft, user_message, answered, APP_CONFIG.llm_api)
-            session.draft = draft
-            session.draft_history.append(draft)
-            session.status = "refining"
-            self._json(
-                {
-                    "draft": to_dict(draft),
-                    "diffSummary": [
-                        "Appended reviewer guidance as an extra action block.",
-                        "Marked answered questions and preserved unresolved ones.",
-                    ],
-                }
-            )
-            return
-
-        if parsed.path.endswith("/confirm"):
-            session_id = parsed.path.split("/")[-2]
-            session = SESSIONS.get(session_id)
-            session.status = "confirmed"
-            self._json(
-                {
-                    "sessionId": session.id,
-                    "finalDraft": to_dict(session.draft),
-                    "exportText": session.draft.raw_text if session.draft else "",
-                }
-            )
-            return
-
-        self.send_error(HTTPStatus.NOT_FOUND)
 
     def _serve_file(self, path: Path, content_type: str) -> None:
         if not path.exists():
@@ -246,8 +285,9 @@ def run() -> None:
     host, port, data_dir = resolve_runtime_settings()
     configure_runtime(data_dir)
     server = ThreadingHTTPServer((host, port), AppHandler)
-    print(f"Serving offline MVP at http://{host}:{port}")
-    print(f"Using Epic data directory: {data_dir}")
+    log_event("BOOT", "Server code version: prompt-render-logging-v2")
+    log_event("BOOT", f"Serving offline MVP at http://{host}:{port}")
+    log_event("BOOT", f"Using Epic data directory: {data_dir}")
     server.serve_forever()
 
 

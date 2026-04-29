@@ -1,312 +1,208 @@
-# workflow
+# Agentic-Workflow
 
-This repository contains an Epic analysis workbench. Local Epic JSON files are read, retrieval intent is produced from Epic descriptions, code evidence is retrieved from a local vector store, and a `What to Do` draft with open questions is generated and refined in a web UI.
+Agentic-Workflow is a local-first workbench for turning Epic descriptions into a structured `What to Do` draft.
 
-The current default pipeline is:
+The current pipeline is:
 
-1. Local Epic data is loaded.
+1. Epic JSON data is loaded from `data/epics/`.
 2. Retrieval intent is generated from the Epic description.
 3. Code evidence is retrieved from a local embedding model and local vector store.
-4. A `What to Do` draft is generated through the configured LLM path.
-5. Refinement is performed in the browser UI with historical `whatToDo` shown as reference.
+4. A `What to Do` draft is generated through the configured LLM mode.
+5. Refinement and open-question handling are performed in the browser UI.
 
-## Repository layout
+## Repository structure
 
-### Project entry points
+### Entry points
 
-- [run.py](/Users/ztcc123/Desktop/BMWcode/run.py)
+- `run.py`
   Cross-platform startup entry point.
 
-- [requirements.txt](/Users/ztcc123/Desktop/BMWcode/requirements.txt)
+- `requirements.txt`
   Python dependency manifest.
 
-- [.env](/Users/ztcc123/Desktop/BMWcode/.env)
+- `.env`
   Active runtime configuration file.
 
-- [.env.example](/Users/ztcc123/Desktop/BMWcode/.env.example)
-  Configuration template.
+- `.env.example`
+  Runtime configuration template.
 
-### Backend
+## Backend structure
 
-- [apps/api/src/server.py](/Users/ztcc123/Desktop/BMWcode/apps/api/src/server.py)
-  HTTP server entry point. API routes, session orchestration, and end-to-end flow wiring are defined here.
+### Core runtime
 
-- [apps/api/src/config.py](/Users/ztcc123/Desktop/BMWcode/apps/api/src/config.py)
-  Central non-sensitive configuration file. Default runtime behavior, local RAG behavior, and LLM defaults are defined here.
+- `apps/api/src/server.py`
+  HTTP server entry point. Route handling, session orchestration, and end-to-end workflow wiring are defined here.
 
-- [apps/api/src/prompt_loader.py](/Users/ztcc123/Desktop/BMWcode/apps/api/src/prompt_loader.py)
-  Prompt and few-shot loading utilities are defined here.
+- `apps/api/src/config.py`
+  Central runtime configuration. Non-sensitive defaults are grouped here. Environment-variable overrides are resolved here.
 
-### Epic loading
+- `apps/api/src/prompt_loader.py`
+  Prompt text and few-shot assets are loaded here.
 
-- [apps/api/src/modules/epics/repository.py](/Users/ztcc123/Desktop/BMWcode/apps/api/src/modules/epics/repository.py)
-  Local Epic JSON files are normalized here. `id`, `title`, `description`, and `whatToDo` are extracted here.
+### Epic ingestion
 
-- [apps/api/src/modules/epics/what_to_do_parser.py](/Users/ztcc123/Desktop/BMWcode/apps/api/src/modules/epics/what_to_do_parser.py)
-  Raw `whatToDo` text is parsed into structured steps and files-to-change data here.
+- `apps/api/src/modules/epics/repository.py`
+  Epic JSON files are read and normalized here.
+
+- `apps/api/src/modules/epics/what_to_do_parser.py`
+  Historical `whatToDo` text is parsed into structured steps and file-change entries here.
 
 ### Integration layer
 
-- [apps/api/src/modules/integrations/code_rag_adapter.py](/Users/ztcc123/Desktop/BMWcode/apps/api/src/modules/integrations/code_rag_adapter.py)
-  Code retrieval modes are implemented here. Support is structured for:
-  - `mock`
-  - `local`
-  - `remote`
+- `apps/api/src/modules/integrations/llm_adapter.py`
+  Retrieval-intent generation, draft generation, and refinement are dispatched here. `mock`, `local`, and `remote` modes are defined here.
 
-  The current default is `local`, where:
-  - a local embedding model is loaded,
-  - a local vector store is loaded,
-  - a query is derived from retrieval intent,
-  - vector retrieval is executed locally.
-
-- [apps/api/src/modules/integrations/llm_adapter.py](/Users/ztcc123/Desktop/BMWcode/apps/api/src/modules/integrations/llm_adapter.py)
-  LLM execution modes are implemented here. Support is structured for:
-  - `mock`
-  - `local`
-  - `remote`
-
-  The current default is `remote`, where:
-  - a token may be acquired through M2M credentials,
-  - `Bearer` authentication and `x-apikey` are attached,
-  - retrieval intent, draft generation, and refinement are driven by prompt files.
+- `apps/api/src/modules/integrations/code_rag_adapter.py`
+  Code-evidence retrieval is dispatched here. `mock`, `local`, and `remote` modes are defined here.
 
 ### Session and shared models
 
-- [apps/api/src/modules/sessions/store.py](/Users/ztcc123/Desktop/BMWcode/apps/api/src/modules/sessions/store.py)
+- `apps/api/src/modules/sessions/store.py`
   In-memory session state is stored here.
 
-- [apps/api/src/modules/shared/models.py](/Users/ztcc123/Desktop/BMWcode/apps/api/src/modules/shared/models.py)
-  Shared internal data models are defined here.
+- `apps/api/src/modules/shared/models.py`
+  Shared internal models are defined here.
 
-### Prompt and few-shot assets
+## Prompt assets
 
-Directory:
-[apps/api/src/prompts](/Users/ztcc123/Desktop/BMWcode/apps/api/src/prompts)
+Prompt files are stored in:
 
-Key files:
+- `apps/api/src/prompts/`
 
-- [retrieval_intent_system.txt](/Users/ztcc123/Desktop/BMWcode/apps/api/src/prompts/retrieval_intent_system.txt)
-  The retrieval-intent system prompt is defined here.
+Key prompt files:
 
-- [retrieval_intent_fewshot.json](/Users/ztcc123/Desktop/BMWcode/apps/api/src/prompts/retrieval_intent_fewshot.json)
-  Few-shot retrieval-intent references are stored here.
+- `retrieval_intent_system.txt`
+  System prompt for summarizing the Epic and producing retrieval intent.
 
-- [draft_generation_system.txt](/Users/ztcc123/Desktop/BMWcode/apps/api/src/prompts/draft_generation_system.txt)
-  The `What to Do` generation prompt is defined here.
+- `retrieval_intent_fewshot.json`
+  Few-shot examples for retrieval-intent output shape and style.
 
-- [draft_generation_fewshot.json](/Users/ztcc123/Desktop/BMWcode/apps/api/src/prompts/draft_generation_fewshot.json)
-  Few-shot draft-generation references are stored here.
+- `draft_generation_system.txt`
+  System prompt for generating the `What to Do` draft.
 
-- [refine_open_questions_system.txt](/Users/ztcc123/Desktop/BMWcode/apps/api/src/prompts/refine_open_questions_system.txt)
-  The refinement and open-question prompt is defined here.
+- `draft_generation_fewshot.json`
+  Few-shot examples for draft output shape and style.
 
-- [refine_open_questions_fewshot.json](/Users/ztcc123/Desktop/BMWcode/apps/api/src/prompts/refine_open_questions_fewshot.json)
-  Few-shot refinement references are stored here.
+- `refine_open_questions_system.txt`
+  System prompt for refinement and open-question generation.
 
-### Frontend
+- `refine_open_questions_fewshot.json`
+  Few-shot examples for refinement behavior.
 
-- [apps/web/index.html](/Users/ztcc123/Desktop/BMWcode/apps/web/index.html)
-  The page structure is defined here.
+## Frontend structure
 
-- [apps/web/styles.css](/Users/ztcc123/Desktop/BMWcode/apps/web/styles.css)
-  Layout and styling are defined here, including the resizable three-panel layout.
+- `apps/web/index.html`
+  Static page structure.
 
-- [apps/web/app.js](/Users/ztcc123/Desktop/BMWcode/apps/web/app.js)
-  Browser-side interaction logic is implemented here. Epic loading, generate/refine/confirm actions, and panel resizing are handled here.
+- `apps/web/styles.css`
+  Layout and styling, including the resizable multi-panel workbench layout.
 
-### Data and documentation
+- `apps/web/app.js`
+  Browser-side interaction logic, including Epic loading, draft generation, refinement, confirmation, and panel resizing.
 
-- [data/epics](/Users/ztcc123/Desktop/BMWcode/data/epics)
-  Local Epic JSON samples are stored here.
+## Data and supporting documentation
 
-- [docs/architecture.md](/Users/ztcc123/Desktop/BMWcode/docs/architecture.md)
-  Supplemental architecture notes are stored here.
+- `data/epics/`
+  Local Epic JSON files.
 
-## Current default runtime shape
+- `docs/architecture.md`
+  Supplemental implementation notes.
 
-The current default shape is:
+## Runtime modes
+
+The current default runtime shape is:
 
 - Epic source: local
 - Code RAG: local
 - LLM: remote
 
-This is driven by:
-
-- `DEFAULT_CODE_RAG["mode"] = "local"`
-- `DEFAULT_LLM["mode"] = "remote"`
-
-## Configuration structure
-
-### `.env`
-
-Runtime-sensitive and machine-specific values are intended to be placed in:
-[.env](/Users/ztcc123/Desktop/BMWcode/.env)
-
-Typical values placed there are:
-
-- local absolute paths,
-- remote endpoints,
-- certificate paths,
-- API keys,
-- client IDs,
-- client secrets,
-- temporary overrides.
-
-### `config.py`
-
-Non-sensitive defaults are intended to be placed in:
-[config.py](/Users/ztcc123/Desktop/BMWcode/apps/api/src/config.py)
-
-The following configuration blocks are defined there:
-
-- `USER_SERVER`
-  Default host and port.
-
-- `USER_PATHS`
-  Default Epic-data and prompt-directory paths.
-
-- `DEFAULT_CODE_RAG`
-  Default local retrieval behavior, including:
-  - mode,
-  - embedding model path,
-  - vector store path,
-  - filtering rules,
-  - ranking mode,
-  - retrieval depth.
-
-- `DEFAULT_LLM`
-  Default LLM behavior, including:
-  - mode,
-  - model name,
-  - timeout,
-  - temperature,
-  - max tokens,
-  - remote request defaults.
+The runtime modes are controlled in `apps/api/src/config.py` and can be overridden through `.env`.
 
 ## What is edited where
 
-### Runtime values
+### Runtime values and secrets
 
-The following file is intended to be edited first:
-[.env](/Users/ztcc123/Desktop/BMWcode/.env)
+The following file is edited for machine-specific paths, endpoints, and secrets:
 
-The most commonly edited fields are:
+- `.env`
 
-- `BMWCODE_CODE_RAG_EMBEDDING_MODEL_PATH`
-- `BMWCODE_CODE_RAG_VECTOR_STORE_PATH`
-- `BMWCODE_LLM_ENDPOINT`
-- `BMWCODE_LLM_API_PATH`
-- `BMWCODE_LLM_CERT_PATH`
-- `BMWCODE_LLM_AUTH_URL`
-- `BMWCODE_LLM_API_KEY`
-- `BMWCODE_LLM_CLIENT_ID`
-- `BMWCODE_LLM_CLIENT_SECRET`
+Typical values edited there:
 
-If the Epic directory differs from the default, this field is also edited:
+- `AGENTIC_WORKFLOW_EPIC_DATA_DIR`
+- `AGENTIC_WORKFLOW_PROMPT_DIR`
+- `AGENTIC_WORKFLOW_CODE_RAG_EMBEDDING_MODEL_PATH`
+- `AGENTIC_WORKFLOW_CODE_RAG_VECTOR_STORE_PATH`
+- `AGENTIC_WORKFLOW_LLM_ENDPOINT`
+- `AGENTIC_WORKFLOW_LLM_API_PATH`
+- `AGENTIC_WORKFLOW_LLM_CERT_PATH`
+- `AGENTIC_WORKFLOW_LLM_AUTH_URL`
+- `AGENTIC_WORKFLOW_LLM_API_KEY`
+- `AGENTIC_WORKFLOW_LLM_CLIENT_ID`
+- `AGENTIC_WORKFLOW_LLM_CLIENT_SECRET`
 
-- `BMWCODE_EPIC_DATA_DIR`
+### Non-sensitive defaults
 
-### Default behavior
+The following file is edited for default runtime behavior:
 
-The following file is intended to be edited when non-sensitive defaults should change:
-[config.py](/Users/ztcc123/Desktop/BMWcode/apps/api/src/config.py)
+- `apps/api/src/config.py`
 
 Typical edits include:
 
-- local retrieval mode,
-- local retrieval filters,
-- `top_k`,
-- allowed extensions,
-- LLM mode,
-- model name,
-- temperature,
-- `max_tokens`,
-- default timeout.
+- Code RAG mode
+- local retrieval filters
+- `top_k`
+- allowed extensions
+- LLM mode
+- model name
+- timeout
+- temperature
+- `max_tokens`
 
 ### Prompt behavior
 
-The following directory is intended to be edited when model behavior should change:
-[apps/api/src/prompts](/Users/ztcc123/Desktop/BMWcode/apps/api/src/prompts)
+The following directory is edited when model behavior should change:
 
-Typical edits include:
+- `apps/api/src/prompts/`
 
-- retrieval-query shaping,
-- retrieval-intent structure,
-- `What to Do` output format,
-- historical style alignment,
-- open-question behavior,
-- refinement behavior.
+Typical prompt edits include:
 
-### Adapter logic
+- retrieval-intent format
+- retrieval-query guidance
+- `What to Do` structure
+- open-question style
+- refinement behavior
 
-The following files are intended to be edited when low-level integration behavior should change:
+### Integration behavior
 
-- [code_rag_adapter.py](/Users/ztcc123/Desktop/BMWcode/apps/api/src/modules/integrations/code_rag_adapter.py)
-- [llm_adapter.py](/Users/ztcc123/Desktop/BMWcode/apps/api/src/modules/integrations/llm_adapter.py)
+The following files are edited when low-level integration logic should change:
+
+- `apps/api/src/modules/integrations/code_rag_adapter.py`
+- `apps/api/src/modules/integrations/llm_adapter.py`
 
 ## Configuration precedence
 
 The current precedence is:
 
-1. Shell environment variables exported before startup
+1. Environment variables exported before startup
 2. Values loaded from `.env`
-3. Defaults defined in `config.py`
+3. Defaults defined in `apps/api/src/config.py`
 
-Because `.env` is loaded with `override=False`, explicit shell exports take precedence over `.env`.
+The `AGENTIC_WORKFLOW_*` prefix is used for runtime environment variables.
 
-## Path compatibility
+## Startup
 
-The current path resolver supports:
-
-- relative paths,
-- macOS/Linux absolute paths,
-- Windows absolute paths such as `C:\work\...` or `C:/work/...`,
-- UNC paths such as `\\server\share\...`
-
-This allows the same repository to be moved between macOS and Windows with only configuration-path changes.
-
-## Run
-
-Dependencies are installed with:
+Install dependencies:
 
 ```bash
 python -m pip install -r requirements.txt
 ```
 
-The application is started with:
+Run the application:
 
 ```bash
 python run.py
 ```
 
-The workbench is then available at:
+Open the browser UI:
 
-[http://127.0.0.1:8000](http://127.0.0.1:8000)
-
-## Current implementation status
-
-The following parts are already wired into the flow:
-
-- local Epic loading,
-- raw `whatToDo` parsing,
-- prompt and few-shot loading,
-- remote BMW-style LLM calls,
-- local code-RAG retrieval flow,
-- browser workbench UI.
-
-The following extension points remain available:
-
-- `local` LLM mode,
-- `remote` code-RAG mode,
-- richer evidence rendering,
-- live Jira integration.
-
-## Recommended first validation order
-
-1. Values are filled in [`.env`](/Users/ztcc123/Desktop/BMWcode/.env).
-2. Default modes are reviewed in [config.py](/Users/ztcc123/Desktop/BMWcode/apps/api/src/config.py).
-3. The server is started with `python run.py`.
-4. An Epic is selected in the UI.
-5. Retrieval intent is inspected.
-6. Retrieved evidence is inspected.
-7. Generated draft quality is compared against historical `whatToDo`.
+- `http://127.0.0.1:8000`

@@ -1,64 +1,68 @@
-# Offline MVP Architecture
+# Agentic-Workflow Architecture
 
-This repository now contains a thin offline MVP for generating `What to Do` drafts from local Epic JSON data.
+This repository contains a local-first workflow for generating `What to Do` drafts from Epic descriptions.
 
-## Current shape
+## Current implementation shape
 
 - `data/epics/*.json`
-  - Each Epic stays in a single JSON file.
-  - `description` remains a raw text block.
-  - `whatToDo` remains a raw text block.
-- `apps/api/src`
-  - Python standard-library API server.
-  - Local Epic repository.
-  - `whatToDo` runtime parser.
-  - Placeholder retrieval and draft services.
-- `apps/web`
-  - Static three-panel workbench UI.
+  Each Epic remains in one JSON file. `description` is kept as raw text. Historical `whatToDo` content is preserved and parsed at runtime.
+
+- `apps/api/src/`
+  Backend logic, configuration, prompt loading, integration adapters, Epic parsing, and session state are implemented here.
+
+- `apps/web/`
+  Static browser workbench UI is implemented here.
+
 - `run.py`
-  - Cross-platform entry point.
-- `requirements.txt`
-  - Dependency manifest, currently standard-library only.
-
-## Why this shape
-
-- No destructive migration of the existing Epic corpus.
-- `description` can stay free-form for LLM summarization.
-- `whatToDo` is parsed at read time so we can:
-  - reuse historical samples as style references,
-  - compare generated output to historical answers,
-  - keep the original text untouched if parsing rules evolve later.
+  Cross-platform startup entry point.
 
 ## Main flow
 
-1. User selects a local Epic.
-2. API creates a session.
-3. API builds a retrieval intent from the Epic description.
-4. API fetches placeholder evidence.
-5. API loads historical `whatToDo` samples from other Epic JSON files.
-6. API generates a first `What to Do` draft.
-7. User refines the draft in the workbench.
-8. API stores draft versions and exports the final text on confirm.
+1. A local Epic is selected in the UI.
+2. A session is created.
+3. Retrieval intent is generated from the Epic description.
+4. Code evidence is retrieved from the configured Code RAG mode.
+5. Historical `whatToDo` samples are loaded as references.
+6. A first draft is generated.
+7. Refinement and open-question handling are performed in the workbench.
+8. The latest draft is confirmed and exported.
 
-## Intended integration points
+## Integration boundaries
 
-- Replace the logic in `modules/integrations/code_rag_adapter.py`
-  - `mode="local"` for local embedding model + local vector store.
-  - `mode="remote"` for an HTTP-backed RAG service.
-- Replace the logic in `modules/integrations/llm_adapter.py`
-  - `mode="local"` for local draft/refine testing.
-  - `mode="remote"` for endpoint-based generation and refinement.
-- Extend `modules/epics/repository.py`
-  - Add a future Jira provider while keeping the same internal models.
+### LLM integration
+
+LLM behavior is defined in:
+
+- `apps/api/src/modules/integrations/llm_adapter.py`
+
+Supported runtime modes:
+
+- `mock`
+- `local`
+- `remote`
+
+### Code RAG integration
+
+Code retrieval behavior is defined in:
+
+- `apps/api/src/modules/integrations/code_rag_adapter.py`
+
+Supported runtime modes:
+
+- `mock`
+- `local`
+- `remote`
 
 ## Runtime configuration
 
-The app can be configured through either CLI flags or environment variables:
+Configuration is split into two layers:
 
-- `--host` / `BMWCODE_HOST`
-- `--port` / `BMWCODE_PORT`
-- `--data-dir` / `BMWCODE_EPIC_DATA_DIR`
-- `BMWCODE_CODE_RAG_*`
-- `BMWCODE_LLM_*`
+- `apps/api/src/config.py`
+  Non-sensitive defaults and mode selection.
 
-This keeps the same code runnable on macOS, Windows, and Linux without hard-coded machine paths.
+- `.env`
+  Machine-specific values, endpoints, credentials, and path overrides.
+
+The environment-variable prefix is:
+
+- `AGENTIC_WORKFLOW_*`

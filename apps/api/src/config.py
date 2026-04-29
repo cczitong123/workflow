@@ -18,6 +18,7 @@ if load_dotenv is not None:
 
 DEFAULT_EPIC_DATA_DIR = PROJECT_ROOT / "data" / "epics"
 DEFAULT_PROMPT_DIR = PROJECT_ROOT / "apps" / "api" / "src" / "prompts"
+ENV_PREFIX = "AGENTIC_WORKFLOW"
 
 # Edit these blocks directly when you want a ready-to-run local setup.
 # `.env` is still supported for secrets and machine-specific overrides.
@@ -145,98 +146,102 @@ def _resolve_optional_path(value: str) -> str:
     return str(_resolve_path(value))
 
 
+def _env(name: str, default: str) -> str:
+    return os.getenv(f"{ENV_PREFIX}_{name}", default)
+
+
 def load_app_config() -> AppConfig:
-    data_dir = _resolve_path(os.getenv("BMWCODE_EPIC_DATA_DIR", USER_PATHS["epic_data_dir"]))
-    prompt_dir = _resolve_path(os.getenv("BMWCODE_PROMPT_DIR", USER_PATHS["prompt_dir"]))
+    data_dir = _resolve_path(_env("EPIC_DATA_DIR", USER_PATHS["epic_data_dir"]))
+    prompt_dir = _resolve_path(_env("PROMPT_DIR", USER_PATHS["prompt_dir"]))
 
     return AppConfig(
-        host=os.getenv("BMWCODE_HOST", USER_SERVER["host"]),
-        port=int(os.getenv("BMWCODE_PORT", str(USER_SERVER["port"]))),
+        host=_env("HOST", USER_SERVER["host"]),
+        port=int(_env("PORT", str(USER_SERVER["port"]))),
         prompt_dir=prompt_dir,
         epic_data=EpicDataConfig(data_dir=data_dir),
         code_rag=CodeRagConfig(
-            mode=os.getenv("BMWCODE_CODE_RAG_MODE", DEFAULT_CODE_RAG["mode"]),
+            mode=_env("CODE_RAG_MODE", DEFAULT_CODE_RAG["mode"]),
             embedding_model_path=_resolve_optional_path(
-                os.getenv(
-                    "BMWCODE_CODE_RAG_EMBEDDING_MODEL_PATH",
+                _env(
+                    "CODE_RAG_EMBEDDING_MODEL_PATH",
                     DEFAULT_CODE_RAG["embedding_model_path"],
                 )
             ),
             vector_store_path=_resolve_optional_path(
-                os.getenv(
-                    "BMWCODE_CODE_RAG_VECTOR_STORE_PATH",
+                _env(
+                    "CODE_RAG_VECTOR_STORE_PATH",
                     DEFAULT_CODE_RAG["vector_store_path"],
                 )
             ),
             metadata_path=_resolve_optional_path(
-                os.getenv(
-                    "BMWCODE_CODE_RAG_METADATA_PATH",
+                _env(
+                    "CODE_RAG_METADATA_PATH",
                     DEFAULT_CODE_RAG["metadata_path"],
                 )
             ),
-            device=os.getenv("BMWCODE_CODE_RAG_DEVICE", DEFAULT_CODE_RAG["device"]),
-            max_tokens=int(os.getenv("BMWCODE_CODE_RAG_MAX_TOKENS", str(DEFAULT_CODE_RAG["max_tokens"]))),
-            stopwords_lang=os.getenv("BMWCODE_CODE_RAG_STOPWORDS_LANG", DEFAULT_CODE_RAG["stopwords_lang"]),
-            include_prefix=os.getenv("BMWCODE_CODE_RAG_INCLUDE_PREFIX", DEFAULT_CODE_RAG["include_prefix"]),
-            exclude_prefix=os.getenv("BMWCODE_CODE_RAG_EXCLUDE_PREFIX", DEFAULT_CODE_RAG["exclude_prefix"]),
+            device=_env("CODE_RAG_DEVICE", DEFAULT_CODE_RAG["device"]),
+            max_tokens=int(_env("CODE_RAG_MAX_TOKENS", str(DEFAULT_CODE_RAG["max_tokens"]))),
+            stopwords_lang=_env("CODE_RAG_STOPWORDS_LANG", DEFAULT_CODE_RAG["stopwords_lang"]),
+            include_prefix=_env("CODE_RAG_INCLUDE_PREFIX", DEFAULT_CODE_RAG["include_prefix"]),
+            exclude_prefix=_env("CODE_RAG_EXCLUDE_PREFIX", DEFAULT_CODE_RAG["exclude_prefix"]),
             allowed_extensions=[
                 item.strip()
-                for item in os.getenv(
-                    "BMWCODE_CODE_RAG_ALLOWED_EXTENSIONS",
+                for item in _env(
+                    "CODE_RAG_ALLOWED_EXTENSIONS",
                     ",".join(DEFAULT_CODE_RAG["allowed_extensions"]),
                 ).split(",")
                 if item.strip()
             ],
             exclude_filename_keywords=[
                 item.strip()
-                for item in os.getenv(
-                    "BMWCODE_CODE_RAG_EXCLUDE_FILENAME_KEYWORDS",
+                for item in _env(
+                    "CODE_RAG_EXCLUDE_FILENAME_KEYWORDS",
                     ",".join(DEFAULT_CODE_RAG["exclude_filename_keywords"]),
                 ).split(",")
                 if item.strip()
             ],
             exclude_path_keywords=[
                 item.strip()
-                for item in os.getenv(
-                    "BMWCODE_CODE_RAG_EXCLUDE_PATH_KEYWORDS",
+                for item in _env(
+                    "CODE_RAG_EXCLUDE_PATH_KEYWORDS",
                     ",".join(DEFAULT_CODE_RAG["exclude_path_keywords"]),
                 ).split(",")
                 if item.strip()
             ],
-            ranking_mode=os.getenv("BMWCODE_CODE_RAG_RANKING_MODE", DEFAULT_CODE_RAG["ranking_mode"]),
-            endpoint=os.getenv("BMWCODE_CODE_RAG_ENDPOINT", ""),
-            index_name=os.getenv("BMWCODE_CODE_RAG_INDEX", ""),
-            api_key=os.getenv("BMWCODE_CODE_RAG_API_KEY", ""),
-            access_token=os.getenv("BMWCODE_CODE_RAG_ACCESS_TOKEN", ""),
-            top_k=int(os.getenv("BMWCODE_CODE_RAG_TOP_K", str(DEFAULT_CODE_RAG["top_k"]))),
+            ranking_mode=_env("CODE_RAG_RANKING_MODE", DEFAULT_CODE_RAG["ranking_mode"]),
+            endpoint=_env("CODE_RAG_ENDPOINT", ""),
+            index_name=_env("CODE_RAG_INDEX", ""),
+            api_key=_env("CODE_RAG_API_KEY", ""),
+            access_token=_env("CODE_RAG_ACCESS_TOKEN", ""),
+            top_k=int(_env("CODE_RAG_TOP_K", str(DEFAULT_CODE_RAG["top_k"]))),
         ),
         llm_api=LlmApiConfig(
-            mode=os.getenv("BMWCODE_LLM_MODE", DEFAULT_LLM["mode"]),
+            mode=_env("LLM_MODE", DEFAULT_LLM["mode"]),
             local_model_path=_resolve_optional_path(
-                os.getenv("BMWCODE_LLM_LOCAL_MODEL_PATH", DEFAULT_LLM["local_model_path"])
+                _env("LLM_LOCAL_MODEL_PATH", DEFAULT_LLM["local_model_path"])
             ),
-            device=os.getenv("BMWCODE_LLM_DEVICE", DEFAULT_LLM["device"]),
-            endpoint=os.getenv("BMWCODE_LLM_ENDPOINT", DEFAULT_LLM["endpoint"]),
-            api_path=os.getenv("BMWCODE_LLM_API_PATH", DEFAULT_LLM["api_path"]),
-            model=os.getenv("BMWCODE_LLM_MODEL", DEFAULT_LLM["model"]),
-            api_key=os.getenv("BMWCODE_LLM_API_KEY", DEFAULT_LLM["api_key"]),
-            access_token=os.getenv("BMWCODE_LLM_ACCESS_TOKEN", DEFAULT_LLM["access_token"]),
-            cert_path=_resolve_optional_path(os.getenv("BMWCODE_LLM_CERT_PATH", DEFAULT_LLM["cert_path"])),
-            auth_url=os.getenv(
-                "BMWCODE_LLM_AUTH_URL",
+            device=_env("LLM_DEVICE", DEFAULT_LLM["device"]),
+            endpoint=_env("LLM_ENDPOINT", DEFAULT_LLM["endpoint"]),
+            api_path=_env("LLM_API_PATH", DEFAULT_LLM["api_path"]),
+            model=_env("LLM_MODEL", DEFAULT_LLM["model"]),
+            api_key=_env("LLM_API_KEY", DEFAULT_LLM["api_key"]),
+            access_token=_env("LLM_ACCESS_TOKEN", DEFAULT_LLM["access_token"]),
+            cert_path=_resolve_optional_path(_env("LLM_CERT_PATH", DEFAULT_LLM["cert_path"])),
+            auth_url=_env(
+                "LLM_AUTH_URL",
                 DEFAULT_LLM["auth_url"],
             ),
-            client_id=os.getenv("BMWCODE_LLM_CLIENT_ID", DEFAULT_LLM["client_id"]),
-            client_secret=os.getenv("BMWCODE_LLM_CLIENT_SECRET", DEFAULT_LLM["client_secret"]),
-            timeout_seconds=int(os.getenv("BMWCODE_LLM_TIMEOUT_SECONDS", str(DEFAULT_LLM["timeout_seconds"]))),
-            temperature=float(os.getenv("BMWCODE_LLM_TEMPERATURE", str(DEFAULT_LLM["temperature"]))),
-            max_tokens=int(os.getenv("BMWCODE_LLM_MAX_TOKENS", str(DEFAULT_LLM["max_tokens"]))),
-            top_p=float(os.getenv("BMWCODE_LLM_TOP_P", str(DEFAULT_LLM["top_p"]))),
+            client_id=_env("LLM_CLIENT_ID", DEFAULT_LLM["client_id"]),
+            client_secret=_env("LLM_CLIENT_SECRET", DEFAULT_LLM["client_secret"]),
+            timeout_seconds=int(_env("LLM_TIMEOUT_SECONDS", str(DEFAULT_LLM["timeout_seconds"]))),
+            temperature=float(_env("LLM_TEMPERATURE", str(DEFAULT_LLM["temperature"]))),
+            max_tokens=int(_env("LLM_MAX_TOKENS", str(DEFAULT_LLM["max_tokens"]))),
+            top_p=float(_env("LLM_TOP_P", str(DEFAULT_LLM["top_p"]))),
             presence_penalty=float(
-                os.getenv("BMWCODE_LLM_PRESENCE_PENALTY", str(DEFAULT_LLM["presence_penalty"]))
+                _env("LLM_PRESENCE_PENALTY", str(DEFAULT_LLM["presence_penalty"]))
             ),
             frequency_penalty=float(
-                os.getenv("BMWCODE_LLM_FREQUENCY_PENALTY", str(DEFAULT_LLM["frequency_penalty"]))
+                _env("LLM_FREQUENCY_PENALTY", str(DEFAULT_LLM["frequency_penalty"]))
             ),
         ),
     )

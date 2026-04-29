@@ -12,11 +12,16 @@ from config import CodeRagConfig
 from modules.shared.models import EvidenceItem, RetrievalIntent
 
 
+def _log(message: str) -> None:
+    print(f"[AGENTIC-WORKFLOW][RAG] {message}", flush=True)
+
+
 def retrieve_code_evidence(
     intent: RetrievalIntent,
     config: CodeRagConfig,
 ) -> list[EvidenceItem]:
     mode = config.mode.lower().strip()
+    _log(f"retrieve_code_evidence mode={mode} top_k={config.top_k}")
     if mode == "mock":
         return _retrieve_mock_evidence(intent, config.top_k)
     if mode == "local":
@@ -73,10 +78,14 @@ def _retrieve_local_evidence(
     intent: RetrievalIntent,
     config: CodeRagConfig,
 ) -> list[EvidenceItem]:
+    _log("Loading local RAG state")
     state = _get_local_rag_state(_state_cache_key(config))
     query = _build_query_from_intent(intent)
+    _log(f"Local query built. chars={len(query)} ranking_mode={state['ranking_mode']}")
     query_vec = _embed_text(query, state)
+    _log(f"Query embedding ready. dim={len(query_vec)}")
     results = _search_local_index(query_vec, state, query, config.top_k)
+    _log(f"Local retrieval completed. results={len(results)}")
     return [_result_to_evidence(result, intent) for result in results]
 
 
@@ -154,6 +163,11 @@ def _state_cache_key(config: CodeRagConfig) -> str:
 def _get_local_rag_state(cache_key: str) -> dict[str, Any]:
     config_data = json.loads(cache_key)
     resolved = _resolve_local_config(config_data)
+    _log(
+        "Initializing local RAG state "
+        f"embedding_model_path={resolved['embedding_model_path']} "
+        f"vector_store_path={resolved['vector_store_path']}"
+    )
 
     try:
         import faiss
@@ -187,7 +201,9 @@ def _get_local_rag_state(cache_key: str) -> dict[str, Any]:
         exclude_filename_keywords=resolved["exclude_filename_keywords"],
         exclude_path_keywords=resolved["exclude_path_keywords"],
     )
+    _log(f"Loaded local embeddings. vectors={vectors.shape[0]} dim={vectors.shape[1]}")
     index = _build_faiss_index_cosine(vectors)
+    _log("FAISS index built successfully")
     return {
         "tokenizer": tokenizer,
         "model": model,
@@ -204,8 +220,8 @@ def _get_local_rag_state(cache_key: str) -> dict[str, Any]:
 def _resolve_local_config(config_data: dict[str, Any]) -> dict[str, Any]:
     if not config_data.get("embedding_model_path") or not config_data.get("vector_store_path"):
         raise RuntimeError(
-            "Local Code RAG requires BMWCODE_CODE_RAG_EMBEDDING_MODEL_PATH and "
-            "BMWCODE_CODE_RAG_VECTOR_STORE_PATH to be set."
+            "Local Code RAG requires AGENTIC_WORKFLOW_CODE_RAG_EMBEDDING_MODEL_PATH and "
+            "AGENTIC_WORKFLOW_CODE_RAG_VECTOR_STORE_PATH to be set."
         )
     return config_data
 
@@ -292,18 +308,23 @@ def _search_local_index(
     metadatas = state["metadatas"]
     vectors = state["vectors"]
     index = state["index"]
+    _log(f"Searching local index with ranking_mode={ranking_mode}")
 
     if ranking_mode == "filter":
         filtered_indices = _filter_metadatas_by_filename(metadatas, query, state["stopwords_lang"])
+        _log(f"Filename filter candidates={len(filtered_indices)}")
         if filtered_indices:
             filtered_vectors = vectors[filtered_indices]
             filtered_metas = [metadatas[idx] for idx in filtered_indices]
             filtered_index = _build_faiss_index_cosine(filtered_vectors)
+            _log(f"Using filtered FAISS index size={filtered_vectors.shape[0]}")
             return _query_index_cosine(filtered_index, filtered_metas, norm_query, top_k)
+        _log("No filename-filter matches. Falling back to full FAISS index")
         return _query_index_cosine(index, metadatas, norm_query, top_k)
 
     if ranking_mode == "weight":
         raw_results = _query_index_cosine(index, metadatas, norm_query, top_k * 5)
+        _log(f"Weight mode raw results={len(raw_results)}")
         return _weighted_ranking(raw_results, metadatas, query, state["stopwords_lang"])[:top_k]
 
     return _query_index_cosine(index, metadatas, norm_query, top_k)

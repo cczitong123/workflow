@@ -4,7 +4,7 @@ import json
 import re
 
 from config import LlmApiConfig
-from prompt_loader import load_fewshot_examples, load_prompt_text
+from prompt_loader import load_fewshot_examples, render_prompt
 from modules.shared.models import (
     EvidenceItem,
     FileChange,
@@ -15,8 +15,13 @@ from modules.shared.models import (
 )
 
 
+def _log(message: str) -> None:
+    print(f"[AGENTIC-WORKFLOW][LLM] {message}", flush=True)
+
+
 def build_retrieval_intent(description: str, config: LlmApiConfig) -> tuple[str, str, list[str], list[str]]:
     mode = config.mode.lower().strip()
+    _log(f"build_retrieval_intent mode={mode}")
     if mode == "mock":
         return _build_mock_intent(description)
     if mode == "local":
@@ -36,6 +41,7 @@ def generate_draft(
     config: LlmApiConfig,
 ) -> WhatToDoDraft:
     mode = config.mode.lower().strip()
+    _log(f"generate_draft mode={mode}")
     if mode == "mock":
         return _generate_mock_draft(description, evidence, references)
     if mode == "local":
@@ -55,6 +61,7 @@ def refine_draft(
     config: LlmApiConfig,
 ) -> WhatToDoDraft:
     mode = config.mode.lower().strip()
+    _log(f"refine_draft mode={mode}")
     if mode == "mock":
         return _refine_mock_draft(current, user_message, answered_questions)
     if mode == "local":
@@ -140,11 +147,15 @@ def _build_local_intent(description: str, config: LlmApiConfig) -> tuple[str, st
 
 
 def _build_remote_intent(description: str, config: LlmApiConfig) -> tuple[str, str, list[str], list[str]]:
-    prompt = load_prompt_text("retrieval_intent_system").format(
+    _log("Rendering retrieval_intent_system prompt")
+    prompt = render_prompt(
+        "retrieval_intent_system",
         description=description,
         fewshot=json.dumps(load_fewshot_examples("retrieval_intent_fewshot"), ensure_ascii=False, indent=2),
     )
+    _log(f"Retrieval intent prompt rendered. chars={len(prompt)}")
     payload = _call_remote_chat(prompt, config)
+    _log(f"Retrieval intent response received. chars={len(payload)}")
     data = _parse_json_response(payload)
     return (
         str(data.get("summary", "")),
@@ -171,13 +182,17 @@ def _generate_remote_draft(
     references: list[ParsedWhatToDo],
     config: LlmApiConfig,
 ) -> WhatToDoDraft:
-    prompt = load_prompt_text("draft_generation_system").format(
+    _log("Rendering draft_generation_system prompt")
+    prompt = render_prompt(
+        "draft_generation_system",
         description=description,
         evidence=json.dumps([_evidence_to_prompt(item) for item in evidence], ensure_ascii=False, indent=2),
         references=json.dumps([_reference_to_prompt(item) for item in references], ensure_ascii=False, indent=2),
         fewshot=json.dumps(load_fewshot_examples("draft_generation_fewshot"), ensure_ascii=False, indent=2),
     )
+    _log(f"Draft generation prompt rendered. chars={len(prompt)}")
     payload = _call_remote_chat(prompt, config)
+    _log(f"Draft generation response received. chars={len(payload)}")
     data = _parse_json_response(payload)
     return _draft_from_json(data, version=1)
 
@@ -232,13 +247,17 @@ def _refine_remote_draft(
     answered_questions: list[dict[str, str]],
     config: LlmApiConfig,
 ) -> WhatToDoDraft:
-    prompt = load_prompt_text("refine_open_questions_system").format(
+    _log("Rendering refine_open_questions_system prompt")
+    prompt = render_prompt(
+        "refine_open_questions_system",
         current_draft=json.dumps(_draft_to_prompt(current), ensure_ascii=False, indent=2),
         user_message=user_message,
         answered_questions=json.dumps(answered_questions, ensure_ascii=False, indent=2),
         fewshot=json.dumps(load_fewshot_examples("refine_open_questions_fewshot"), ensure_ascii=False, indent=2),
     )
+    _log(f"Refine prompt rendered. chars={len(prompt)}")
     payload = _call_remote_chat(prompt, config)
+    _log(f"Refine response received. chars={len(payload)}")
     data = _parse_json_response(payload)
     return _draft_from_json(data, version=current.version + 1)
 
@@ -263,8 +282,10 @@ def _call_remote_chat(prompt: str, config: LlmApiConfig) -> str:
             "Remote LLM mode requires httpx. Install dependencies with `python -m pip install -r requirements.txt`."
         ) from exc
 
+    _log("Preparing remote chat call")
     access_token = config.access_token or _get_access_token(config, httpx)
     url = f"{config.endpoint.rstrip('/')}{config.api_path}"
+    _log(f"Remote endpoint ready url={url} model={config.model}")
     headers = {
         "Authorization": f"Bearer {access_token}",
         "x-apikey": config.api_key,
@@ -284,7 +305,9 @@ def _call_remote_chat(prompt: str, config: LlmApiConfig) -> str:
         client_kwargs["verify"] = config.cert_path
 
     with httpx.Client(**client_kwargs) as client:
+        _log("Sending remote chat request")
         response = client.post(url, headers=headers, json=payload)
+        _log(f"Remote chat response status={response.status_code}")
         response.raise_for_status()
         body = response.json()
     try:
@@ -296,9 +319,10 @@ def _call_remote_chat(prompt: str, config: LlmApiConfig) -> str:
 def _get_access_token(config: LlmApiConfig, httpx_module) -> str:
     if not config.client_id or not config.client_secret or not config.auth_url:
         raise RuntimeError(
-            "Remote LLM mode requires either BMWCODE_LLM_ACCESS_TOKEN or the full M2M config: "
-            "BMWCODE_LLM_AUTH_URL, BMWCODE_LLM_CLIENT_ID, BMWCODE_LLM_CLIENT_SECRET."
+            "Remote LLM mode requires either AGENTIC_WORKFLOW_LLM_ACCESS_TOKEN or the full M2M config: "
+            "AGENTIC_WORKFLOW_LLM_AUTH_URL, AGENTIC_WORKFLOW_LLM_CLIENT_ID, AGENTIC_WORKFLOW_LLM_CLIENT_SECRET."
         )
+    _log(f"Requesting M2M token from auth_url={config.auth_url}")
     data = {
         "grant_type": "client_credentials",
         "client_id": config.client_id,
@@ -312,14 +336,17 @@ def _get_access_token(config: LlmApiConfig, httpx_module) -> str:
 
     with httpx_module.Client(**client_kwargs) as client:
         response = client.post(config.auth_url, headers=headers, data=data)
+        _log(f"M2M token response status={response.status_code}")
         response.raise_for_status()
         token = response.json().get("access_token")
     if not token:
         raise RuntimeError("Empty access_token from M2M auth response.")
+    _log("M2M token acquired successfully")
     return token
 
 
 def _parse_json_response(text: str) -> dict:
+    _log("Parsing LLM response as JSON")
     try:
         return json.loads(text)
     except json.JSONDecodeError:
