@@ -63,6 +63,7 @@ DEFAULT_LLM = {
     "client_id": "",
     "client_secret": "",
     "timeout_seconds": 60,
+    "include_tuning_params": False,
     "temperature": 0.2,
     "max_tokens": 1200,
     "top_p": 1.0,
@@ -113,6 +114,7 @@ class LlmApiConfig:
     client_id: str
     client_secret: str
     timeout_seconds: int
+    include_tuning_params: bool
     temperature: float
     max_tokens: int
     top_p: float
@@ -234,6 +236,11 @@ def load_app_config() -> AppConfig:
             client_id=_env("LLM_CLIENT_ID", DEFAULT_LLM["client_id"]),
             client_secret=_env("LLM_CLIENT_SECRET", DEFAULT_LLM["client_secret"]),
             timeout_seconds=int(_env("LLM_TIMEOUT_SECONDS", str(DEFAULT_LLM["timeout_seconds"]))),
+            include_tuning_params=_env(
+                "LLM_INCLUDE_TUNING_PARAMS",
+                str(DEFAULT_LLM["include_tuning_params"]).lower(),
+            ).lower()
+            in {"1", "true", "yes", "on"},
             temperature=float(_env("LLM_TEMPERATURE", str(DEFAULT_LLM["temperature"]))),
             max_tokens=int(_env("LLM_MAX_TOKENS", str(DEFAULT_LLM["max_tokens"]))),
             top_p=float(_env("LLM_TOP_P", str(DEFAULT_LLM["top_p"]))),

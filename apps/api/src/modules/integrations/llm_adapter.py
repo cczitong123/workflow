@@ -294,22 +294,40 @@ def _call_remote_chat(prompt: str, config: LlmApiConfig) -> str:
     payload = {
         "model": config.model,
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": config.temperature,
-        "max_tokens": config.max_tokens,
-        "top_p": config.top_p,
-        "presence_penalty": config.presence_penalty,
-        "frequency_penalty": config.frequency_penalty,
     }
+    if config.include_tuning_params:
+        payload.update(
+            {
+                "temperature": config.temperature,
+                "max_tokens": config.max_tokens,
+                "top_p": config.top_p,
+                "presence_penalty": config.presence_penalty,
+                "frequency_penalty": config.frequency_penalty,
+            }
+        )
     client_kwargs = {"timeout": config.timeout_seconds}
     if config.cert_path:
         client_kwargs["verify"] = config.cert_path
+
+    _log(f"Request URL={url}")
+    _log(f"Request headers keys={list(headers.keys())}")
+    _log(f"x-apikey length={len(config.api_key) if config.api_key else 0}")
+    _log(f"Payload keys={list(payload.keys())}")
 
     with httpx.Client(**client_kwargs) as client:
         _log("Sending remote chat request")
         response = client.post(url, headers=headers, json=payload)
         _log(f"Remote chat response status={response.status_code}")
+        _log(f"Remote chat response headers={dict(response.headers)}")
+        try:
+            body = response.json()
+            _log(f"Remote chat response body(JSON)={json.dumps(body, ensure_ascii=False)[:4000]}")
+        except Exception:
+            body = None
+            _log(f"Remote chat response body(raw)={response.text[:4000]}")
         response.raise_for_status()
-        body = response.json()
+    if body is None:
+        raise RuntimeError("Remote LLM response body is not valid JSON.")
     try:
         return body["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
@@ -337,8 +355,16 @@ def _get_access_token(config: LlmApiConfig, httpx_module) -> str:
     with httpx_module.Client(**client_kwargs) as client:
         response = client.post(config.auth_url, headers=headers, data=data)
         _log(f"M2M token response status={response.status_code}")
+        try:
+            response_body = response.json()
+            _log(f"M2M token body(JSON)={json.dumps(response_body, ensure_ascii=False)[:4000]}")
+        except Exception:
+            response_body = None
+            _log(f"M2M token body(raw)={response.text[:4000]}")
         response.raise_for_status()
-        token = response.json().get("access_token")
+        if response_body is None:
+            raise RuntimeError("M2M token response is not valid JSON.")
+        token = response_body.get("access_token")
     if not token:
         raise RuntimeError("Empty access_token from M2M auth response.")
     _log("M2M token acquired successfully")
