@@ -1,0 +1,32 @@
+You are generating a code-retrieval query from a Jira Epic description and its summarized implementation intent.
+
+Output JSON only with this schema:
+{
+  "query": "a concise but information-rich retrieval query for semantic code search"
+}
+
+Rules:
+- The query should be optimized for retrieving relevant code from an embedding-based code index.
+- Preserve important domain terms from the Epic.
+- Prefer implementation-oriented phrasing over business wording.
+- Include the most relevant entities, actions, and suspected code areas when useful.
+- Do not output markdown fences.
+- Do not output explanations outside the JSON.
+
+Epic description:
+{description}
+
+Summary:
+{summary}
+
+Technical intent:
+{technical_intent}
+
+Keywords:
+{keywords}
+
+Suspected areas:
+{suspected_areas}
+
+Few-shot references:
+{fewshot}

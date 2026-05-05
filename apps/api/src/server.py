@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
+import config as app_config_module
 from config import AppConfig, load_app_config
 from modules.epics.repository import EpicRepository
 from modules.integrations.code_rag_adapter import retrieve_code_evidence
@@ -31,6 +32,31 @@ APP_CONFIG: AppConfig | None = None
 
 def log_event(scope: str, message: str) -> None:
     print(f"[AGENTIC-WORKFLOW][{scope}] {message}", flush=True)
+
+
+def _mask_presence(value: str) -> str:
+    return f"set(len={len(value)})" if value else "missing"
+
+
+def log_config_summary(config: AppConfig) -> None:
+    env_file = app_config_module.PROJECT_ROOT / ".env"
+    dotenv_status = "available" if app_config_module.load_dotenv is not None else "missing"
+    log_event("BOOT", f".env loader status={dotenv_status}")
+    log_event("BOOT", f".env file exists={env_file.exists()}")
+    log_event("BOOT", f"prompt_dir={config.prompt_dir}")
+    log_event("BOOT", f"llm.mode={config.llm_api.mode}")
+    log_event("BOOT", f"llm.endpoint={config.llm_api.endpoint or 'missing'}")
+    log_event("BOOT", f"llm.api_path={config.llm_api.api_path or 'missing'}")
+    log_event("BOOT", f"llm.model={config.llm_api.model or 'missing'}")
+    log_event("BOOT", f"llm.auth_url={config.llm_api.auth_url or 'missing'}")
+    log_event("BOOT", f"llm.cert_path={config.llm_api.cert_path or 'missing'}")
+    log_event("BOOT", f"llm.api_key={_mask_presence(config.llm_api.api_key)}")
+    log_event("BOOT", f"llm.client_id={_mask_presence(config.llm_api.client_id)}")
+    log_event("BOOT", f"llm.client_secret={_mask_presence(config.llm_api.client_secret)}")
+    log_event("BOOT", f"llm.access_token={_mask_presence(config.llm_api.access_token)}")
+    log_event("BOOT", f"code_rag.mode={config.code_rag.mode}")
+    log_event("BOOT", f"code_rag.embedding_model_path={config.code_rag.embedding_model_path or 'missing'}")
+    log_event("BOOT", f"code_rag.vector_store_path={config.code_rag.vector_store_path or 'missing'}")
 
 
 class AppHandler(BaseHTTPRequestHandler):
@@ -111,7 +137,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     return
 
                 log_event("STEP-1", "Building retrieval intent")
-                summary, technical_intent, keywords, suspected_areas = build_retrieval_intent(
+                summary, technical_intent, keywords, suspected_areas, query = build_retrieval_intent(
                     session.input_description,
                     APP_CONFIG.llm_api,
                 )
@@ -120,10 +146,11 @@ class AppHandler(BaseHTTPRequestHandler):
                     technical_intent=technical_intent,
                     keywords=keywords,
                     suspected_areas=suspected_areas,
+                    query=query,
                 )
                 log_event(
                     "STEP-1",
-                    f"Retrieval intent ready. keywords={len(keywords)} suspected_areas={len(suspected_areas)}",
+                    f"Retrieval intent ready. keywords={len(keywords)} suspected_areas={len(suspected_areas)} query_chars={len(query)}",
                 )
 
                 log_event("STEP-2", "Retrieving code evidence")
@@ -277,6 +304,7 @@ def configure_runtime(data_dir: Path) -> None:
         raise FileNotFoundError(f"Web assets directory does not exist: {DEFAULT_WEB_DIR}")
 
     APP_CONFIG = load_app_config()
+    log_config_summary(APP_CONFIG)
     EPICS = EpicRepository(data_dir)
     WEB_DIR = DEFAULT_WEB_DIR
 

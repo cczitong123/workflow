@@ -1,8 +1,1 @@
-[
-  {
-    "input": {
-      "user_message": "Condition A means the backing event is still required during maneuver mode."
-    },
-    "output_behavior": "Update the relevant branch text and mark the matching open question as answered."
-  }
-]
+[]

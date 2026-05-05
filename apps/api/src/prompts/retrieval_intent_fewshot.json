@@ -1,11 +1,1 @@
-[
-  {
-    "input": "The system shall allow a new validation branch only for alternate request path while preserving current default behavior.",
-    "output": {
-      "summary": "Add alternate-path validation while preserving legacy behavior.",
-      "technical_intent": "Locate the alternate request flow, its validator entry point, and tests for legacy fallback behavior.",
-      "keywords": ["alternate path", "validation", "fallback", "request flow"],
-      "suspected_areas": ["request handling", "validator modules", "regression tests"]
-    }
-  }
-]
+[]

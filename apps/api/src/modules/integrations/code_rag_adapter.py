@@ -100,6 +100,8 @@ def _retrieve_remote_evidence(
 
 
 def _build_query_from_intent(intent: RetrievalIntent) -> str:
+    if intent.query.strip():
+        return intent.query.strip()
     pieces = [intent.summary, intent.technical_intent]
     if intent.keywords:
         pieces.append("keywords: " + ", ".join(intent.keywords))
@@ -179,7 +181,7 @@ def _get_local_rag_state(cache_key: str) -> dict[str, Any]:
             "Install dependencies with `python -m pip install -r requirements.txt`."
         ) from exc
 
-    device_name = resolved["device"] or ("cuda" if torch.cuda.is_available() else "cpu")
+    device_name = _normalize_torch_device_name(resolved["device"], torch)
     device = torch.device(device_name)
 
     tokenizer = AutoTokenizer.from_pretrained(
@@ -215,6 +217,22 @@ def _get_local_rag_state(cache_key: str) -> dict[str, Any]:
         "index": index,
         "ranking_mode": resolved["ranking_mode"],
     }
+
+
+def _normalize_torch_device_name(configured_device: str, torch_module) -> str:
+    raw = (configured_device or "").strip().lower()
+    if not raw:
+        return "cuda" if torch_module.cuda.is_available() else "cpu"
+    if raw == "gpu":
+        if torch_module.cuda.is_available():
+            _log("Configured device alias 'gpu' mapped to 'cuda'")
+            return "cuda"
+        _log("Configured device alias 'gpu' requested, but CUDA is unavailable. Falling back to 'cpu'")
+        return "cpu"
+    if raw == "cuda" and not torch_module.cuda.is_available():
+        _log("Configured device 'cuda' requested, but CUDA is unavailable. Falling back to 'cpu'")
+        return "cpu"
+    return raw
 
 
 def _resolve_local_config(config_data: dict[str, Any]) -> dict[str, Any]:

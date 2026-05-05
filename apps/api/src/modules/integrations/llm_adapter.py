@@ -19,7 +19,7 @@ def _log(message: str) -> None:
     print(f"[AGENTIC-WORKFLOW][LLM] {message}", flush=True)
 
 
-def build_retrieval_intent(description: str, config: LlmApiConfig) -> tuple[str, str, list[str], list[str]]:
+def build_retrieval_intent(description: str, config: LlmApiConfig) -> tuple[str, str, list[str], list[str], str]:
     mode = config.mode.lower().strip()
     _log(f"build_retrieval_intent mode={mode}")
     if mode == "mock":
@@ -74,7 +74,7 @@ def refine_draft(
     )
 
 
-def _build_mock_intent(description: str) -> tuple[str, str, list[str], list[str]]:
+def _build_mock_intent(description: str) -> tuple[str, str, list[str], list[str], str]:
     sentences = [line.strip() for line in description.splitlines() if line.strip()]
     summary = sentences[0] if sentences else "No summary available."
     keywords = []
@@ -86,7 +86,17 @@ def _build_mock_intent(description: str) -> tuple[str, str, list[str], list[str]
             break
     suspected_areas = ["request handling", "validation layer", "integration tests"]
     technical_intent = "Infer likely code touch points and describe the required behavior change."
-    return summary, technical_intent, keywords, suspected_areas
+    query = "\n".join(
+        piece
+        for piece in [
+            summary,
+            technical_intent,
+            "keywords: " + ", ".join(keywords) if keywords else "",
+            "suspected areas: " + ", ".join(suspected_areas) if suspected_areas else "",
+        ]
+        if piece
+    )
+    return summary, technical_intent, keywords, suspected_areas, query
 
 
 def _generate_mock_draft(
@@ -139,14 +149,14 @@ def _generate_mock_draft(
     )
 
 
-def _build_local_intent(description: str, config: LlmApiConfig) -> tuple[str, str, list[str], list[str]]:
+def _build_local_intent(description: str, config: LlmApiConfig) -> tuple[str, str, list[str], list[str], str]:
     raise NotImplementedError(
         "Local LLM mode is selected, but local summarization/inference is not implemented yet. "
         "Use config.local_model_path and config.device in this file."
     )
 
 
-def _build_remote_intent(description: str, config: LlmApiConfig) -> tuple[str, str, list[str], list[str]]:
+def _build_remote_intent(description: str, config: LlmApiConfig) -> tuple[str, str, list[str], list[str], str]:
     _log("Rendering retrieval_intent_system prompt")
     prompt = render_prompt(
         "retrieval_intent_system",
@@ -157,11 +167,32 @@ def _build_remote_intent(description: str, config: LlmApiConfig) -> tuple[str, s
     payload = _call_remote_chat(prompt, config)
     _log(f"Retrieval intent response received. chars={len(payload)}")
     data = _parse_json_response(payload)
+    summary = str(data.get("summary", ""))
+    technical_intent = str(data.get("technical_intent", ""))
+    keywords = [str(item) for item in data.get("keywords", [])]
+    suspected_areas = [str(item) for item in data.get("suspected_areas", [])]
+
+    _log("Rendering retrieval_query_system prompt")
+    query_prompt = render_prompt(
+        "retrieval_query_system",
+        description=description,
+        summary=summary,
+        technical_intent=technical_intent,
+        keywords=json.dumps(keywords, ensure_ascii=False),
+        suspected_areas=json.dumps(suspected_areas, ensure_ascii=False),
+        fewshot=json.dumps(load_fewshot_examples("retrieval_query_fewshot"), ensure_ascii=False, indent=2),
+    )
+    _log(f"Retrieval query prompt rendered. chars={len(query_prompt)}")
+    query_payload = _call_remote_chat(query_prompt, config)
+    _log(f"Retrieval query response received. chars={len(query_payload)}")
+    query_data = _parse_json_response(query_payload)
+    query = str(query_data.get("query", "")).strip()
     return (
-        str(data.get("summary", "")),
-        str(data.get("technical_intent", "")),
-        [str(item) for item in data.get("keywords", [])],
-        [str(item) for item in data.get("suspected_areas", [])],
+        summary,
+        technical_intent,
+        keywords,
+        suspected_areas,
+        query,
     )
 
 

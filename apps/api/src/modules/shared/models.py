@@ -45,6 +45,7 @@ class RetrievalIntent:
     technical_intent: str
     keywords: list[str]
     suspected_areas: list[str]
+    query: str = ""
 
 
 @dataclass
