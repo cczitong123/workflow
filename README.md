@@ -1,112 +1,192 @@
 # Agentic-Workflow
 
-Agentic-Workflow is a local-first workbench for turning Epic descriptions into a structured `What to Do` draft.
+Agentic-Workflow is a local-first Epic analysis workbench for turning an Epic description into a structured `What to Do` draft, with code retrieval, refinement, version history, and local traceable persistence.
 
-The current pipeline is:
+## What the application currently does
 
-1. Epic JSON data is loaded from `data/epics/`.
-2. Retrieval intent is generated from the Epic description.
-3. Code evidence is retrieved from a local embedding model and local vector store.
-4. A `What to Do` draft is generated through the configured LLM mode.
-5. Refinement and open-question handling are performed in the browser UI.
+The current flow is:
 
-## Repository structure
+1. An Epic record is loaded from local JSON under `data/epics/`.
+2. The Epic description is summarized into retrieval intent.
+3. A retrieval query is generated from the description and summarized intent.
+4. Code evidence is retrieved from a local embedding model and local vector store.
+5. A `What to Do` draft is generated through the configured LLM mode.
+6. The draft can be refined without rebuilding evidence.
+7. Retrieval can be explicitly re-run with the latest answers and notes.
+8. Draft versions can be restored from version history.
+9. Workflow state is persisted locally in SQLite.
 
-### Entry points
+## Repository map
 
-- `run.py`
+### Top-level entry points
+
+- `/run.py`
   Cross-platform startup entry point.
 
-- `requirements.txt`
+- `/requirements.txt`
   Python dependency manifest.
 
-- `.env`
-  Active runtime configuration file.
+- `/.env`
+  Active runtime configuration with machine-specific and sensitive values.
 
-- `.env.example`
+- `/.env.example`
   Runtime configuration template.
 
-## Backend structure
+- `/README.md`
+  Project overview and operator guide.
 
-### Core runtime
+## Backend architecture
 
-- `apps/api/src/server.py`
-  HTTP server entry point. Route handling, session orchestration, and end-to-end workflow wiring are defined here.
+### Runtime core
 
-- `apps/api/src/config.py`
-  Central runtime configuration. Non-sensitive defaults are grouped here. Environment-variable overrides are resolved here.
+- `/apps/api/src/server.py`
+  Main HTTP server entry point. Request routing, workflow orchestration, partial status updates, session operations, and UI-facing JSON responses are defined here.
 
-- `apps/api/src/prompt_loader.py`
-  Prompt text and few-shot assets are loaded here.
+- `/apps/api/src/config.py`
+  Central configuration loader. Default non-sensitive values, `.env` loading, environment-variable overrides, and path resolution are handled here.
+
+- `/apps/api/src/prompt_loader.py`
+  Prompt text and few-shot assets are loaded and rendered here.
 
 ### Epic ingestion
 
-- `apps/api/src/modules/epics/repository.py`
-  Epic JSON files are read and normalized here.
+- `/apps/api/src/modules/epics/repository.py`
+  Local Epic JSON files are loaded and normalized here.
 
-- `apps/api/src/modules/epics/what_to_do_parser.py`
+- `/apps/api/src/modules/epics/what_to_do_parser.py`
   Historical `whatToDo` text is parsed into structured steps and file-change entries here.
 
 ### Integration layer
 
-- `apps/api/src/modules/integrations/llm_adapter.py`
-  Retrieval-intent generation, draft generation, and refinement are dispatched here. `mock`, `local`, and `remote` modes are defined here.
+- `/apps/api/src/modules/integrations/llm_adapter.py`
+  Retrieval-intent generation, retrieval-query generation, draft generation, refinement, remote authentication, token caching, and response parsing are handled here.
 
-- `apps/api/src/modules/integrations/code_rag_adapter.py`
-  Code-evidence retrieval is dispatched here. `mock`, `local`, and `remote` modes are defined here.
+- `/apps/api/src/modules/integrations/code_rag_adapter.py`
+  Code-evidence retrieval is handled here. Local embedding loading, vector-store loading, FAISS search, ranking, and evidence shaping are defined here.
 
-### Session and shared models
+### Session, versions, and persistence
 
-- `apps/api/src/modules/sessions/store.py`
-  In-memory session state is stored here.
+- `/apps/api/src/modules/sessions/store.py`
+  Local workflow persistence is handled here. SQLite tables for sessions, retrieval versions, evidence snapshots, draft versions, and user events are created and maintained here.
 
-- `apps/api/src/modules/shared/models.py`
-  Shared internal models are defined here.
+- `/apps/api/src/modules/shared/models.py`
+  Shared internal data models are defined here. Session, retrieval intent, evidence, draft, version-record, and parsed Epic data classes live here.
 
-## Prompt assets
+## Prompt system
 
-Prompt files are stored in:
+Prompt assets live in:
 
-- `apps/api/src/prompts/`
+- `/apps/api/src/prompts/`
 
-Key prompt files:
+### Prompt text files
 
-- `retrieval_intent_system.txt`
-  System prompt for summarizing the Epic and producing retrieval intent.
+- `/apps/api/src/prompts/retrieval_intent_system.txt`
+  Rules for turning an Epic description into retrieval intent.
 
-- `retrieval_intent_fewshot.json`
-  Few-shot examples for retrieval-intent output shape and style.
+- `/apps/api/src/prompts/retrieval_query_system.txt`
+  Rules for turning the Epic context and retrieval intent into a code-search query.
 
-- `draft_generation_system.txt`
-  System prompt for generating the `What to Do` draft.
+- `/apps/api/src/prompts/draft_generation_system.txt`
+  Rules for generating the `What to Do` draft from Epic input and code evidence.
 
-- `draft_generation_fewshot.json`
-  Few-shot examples for draft output shape and style.
+- `/apps/api/src/prompts/refine_open_questions_system.txt`
+  Rules for refining the draft and generating or preserving open questions.
 
-- `refine_open_questions_system.txt`
-  System prompt for refinement and open-question generation.
+### Few-shot JSON files
 
-- `refine_open_questions_fewshot.json`
-  Few-shot examples for refinement behavior.
+- `/apps/api/src/prompts/retrieval_query_fewshot.json`
+  Active few-shot file for `description -> retrieval query` examples.
 
-## Frontend structure
+- `/apps/api/src/prompts/retrieval_intent_fewshot.json`
+  Reserved interface for future retrieval-intent few-shot examples. Currently kept as an empty array unless explicitly populated.
 
-- `apps/web/index.html`
-  Static page structure.
+- `/apps/api/src/prompts/draft_generation_fewshot.json`
+  Reserved interface for future draft-generation few-shot examples. Currently kept as an empty array unless explicitly populated.
 
-- `apps/web/styles.css`
-  Layout and styling, including the resizable multi-panel workbench layout.
+- `/apps/api/src/prompts/refine_open_questions_fewshot.json`
+  Reserved interface for future refine/open-question few-shot examples. Currently kept as an empty array unless explicitly populated.
 
-- `apps/web/app.js`
-  Browser-side interaction logic, including Epic loading, draft generation, refinement, confirmation, and panel resizing.
+## Frontend architecture
 
-## Data and supporting documentation
+- `/apps/web/index.html`
+  Static workbench structure. The three-column layout, headings, buttons, info popovers, and panel placeholders are defined here.
 
-- `data/epics/`
-  Local Epic JSON files.
+- `/apps/web/styles.css`
+  Workbench layout, visual hierarchy, resizable columns, panel states, display surfaces, editor styling, and button hierarchy are defined here.
 
-- `docs/architecture.md`
-  Supplemental implementation notes.
+- `/apps/web/app.js`
+  Browser-side workflow logic is implemented here. Epic loading, generate/refine/rerun/confirm actions, status polling, version rendering, restore actions, draft syncing, and UI state transitions are handled here.
+
+## Local data and persistence
+
+- `/data/epics/`
+  Local Epic JSON input files.
+
+- `/data/agentic_workflow.sqlite3`
+  Local SQLite persistence store. Session state, retrieval snapshots, evidence items, draft versions, and user events are stored here.
+
+## Tools for local export and inspection
+
+Export and inspection helpers live in:
+
+- `/tools/`
+
+### Shared helper
+
+- `/tools/export_utils.py`
+  Shared SQLite readers and JSON export helpers used by the standalone export scripts.
+
+### Standalone export scripts
+
+- `/tools/export_session_timeline.py`
+  Exports one session as a timeline-style JSON file.
+
+- `/tools/export_draft_version.py`
+  Exports one draft version as JSON.
+
+- `/tools/export_retrieval_version.py`
+  Exports one retrieval version and linked evidence as JSON.
+
+- `/tools/export_version_diff.py`
+  Exports a JSON diff between two draft version numbers in one session.
+
+- `/tools/export_trace_pack.py`
+  Exports a session-level trace pack as JSON.
+
+These scripts are intentionally configured through editable values at the top of each file. They are designed to be run as:
+
+```bash
+python tools/export_session_timeline.py
+python tools/export_version_diff.py
+```
+
+without passing command-line arguments.
+
+## Current persistence model
+
+The application currently uses SQLite as the main persistence backend.
+
+The SQLite database stores:
+
+- sessions
+- retrieval versions
+- evidence items
+- draft versions
+- user events
+
+Many values inside the database are stored as JSON text fields, such as:
+
+- draft payloads
+- retrieval keywords
+- suspected areas
+- event payloads
+
+This means the current setup is:
+
+- storage backend: SQLite
+- nested structured payloads: JSON inside SQLite fields
+
+There is currently no alternate JSON-file storage mode for the main application workflow.
 
 ## Runtime modes
 
@@ -116,20 +196,21 @@ The current default runtime shape is:
 - Code RAG: local
 - LLM: remote
 
-The runtime modes are controlled in `apps/api/src/config.py` and can be overridden through `.env`.
+The runtime behavior is controlled in `/apps/api/src/config.py` and can be overridden through `/.env`.
 
-## What is edited where
+## Where to change what
 
-### Runtime values and secrets
+### Secrets and machine-specific values
 
-The following file is edited for machine-specific paths, endpoints, and secrets:
+Edit:
 
-- `.env`
+- `/.env`
 
-Typical values edited there:
+Typical values changed there:
 
 - `AGENTIC_WORKFLOW_EPIC_DATA_DIR`
 - `AGENTIC_WORKFLOW_PROMPT_DIR`
+- `AGENTIC_WORKFLOW_STORAGE_DB_PATH`
 - `AGENTIC_WORKFLOW_CODE_RAG_EMBEDDING_MODEL_PATH`
 - `AGENTIC_WORKFLOW_CODE_RAG_VECTOR_STORE_PATH`
 - `AGENTIC_WORKFLOW_LLM_ENDPOINT`
@@ -140,16 +221,16 @@ Typical values edited there:
 - `AGENTIC_WORKFLOW_LLM_CLIENT_ID`
 - `AGENTIC_WORKFLOW_LLM_CLIENT_SECRET`
 
-### Non-sensitive defaults
+### Non-sensitive runtime defaults
 
-The following file is edited for default runtime behavior:
+Edit:
 
-- `apps/api/src/config.py`
+- `/apps/api/src/config.py`
 
-Typical edits include:
+Typical edits:
 
-- Code RAG mode
 - local retrieval filters
+- local model paths
 - `top_k`
 - allowed extensions
 - LLM mode
@@ -160,32 +241,58 @@ Typical edits include:
 
 ### Prompt behavior
 
-The following directory is edited when model behavior should change:
+Edit:
 
-- `apps/api/src/prompts/`
+- `/apps/api/src/prompts/`
 
-Typical prompt edits include:
+Typical edits:
 
 - retrieval-intent format
 - retrieval-query guidance
 - `What to Do` structure
 - open-question style
 - refinement behavior
+- retrieval-query few-shot examples
 
-### Integration behavior
+### Integration logic
 
-The following files are edited when low-level integration logic should change:
+Edit:
 
-- `apps/api/src/modules/integrations/code_rag_adapter.py`
-- `apps/api/src/modules/integrations/llm_adapter.py`
+- `/apps/api/src/modules/integrations/code_rag_adapter.py`
+- `/apps/api/src/modules/integrations/llm_adapter.py`
+
+Typical reasons:
+
+- changing retrieval ranking behavior
+- changing remote request formatting
+- changing local model loading logic
+- changing evidence shaping
+- changing token caching or auth handling
+
+### Frontend UI behavior
+
+Edit:
+
+- `/apps/web/index.html`
+- `/apps/web/styles.css`
+- `/apps/web/app.js`
+
+Typical reasons:
+
+- changing panel layout
+- changing status messaging
+- changing waiting states
+- changing version history rendering
+- changing evidence presentation
+- changing workflow buttons
 
 ## Configuration precedence
 
 The current precedence is:
 
 1. Environment variables exported before startup
-2. Values loaded from `.env`
-3. Defaults defined in `apps/api/src/config.py`
+2. Values loaded from `/.env`
+3. Defaults defined in `/apps/api/src/config.py`
 
 The `AGENTIC_WORKFLOW_*` prefix is used for runtime environment variables.
 
@@ -205,4 +312,4 @@ python run.py
 
 Open the browser UI:
 
-- `http://127.0.0.1:8000`
+- [http://127.0.0.1:8000](http://127.0.0.1:8000)
