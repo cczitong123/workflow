@@ -81,17 +81,46 @@ class WhatToDoDraft:
 
 
 @dataclass
+class DraftVersionRecord:
+    id: int
+    version_number: int
+    source_type: str
+    retrieval_version_id: int | None
+    summary: str
+    raw_text: str
+    created_at: str
+
+
+@dataclass
+class RetrievalVersionRecord:
+    id: int
+    version_number: int
+    trigger_source: str
+    summary: str
+    technical_intent: str
+    query: str
+    keywords: list[str]
+    suspected_areas: list[str]
+    created_at: str
+
+
+@dataclass
 class Session:
     id: str
     epic_id: str
     input_title: str
     input_description: str
+    source_type: str = "local"
     retrieval_intent: RetrievalIntent | None = None
     evidence: list[EvidenceItem] = field(default_factory=list)
     draft: WhatToDoDraft | None = None
     draft_history: list[WhatToDoDraft] = field(default_factory=list)
     reference_samples: list[ParsedWhatToDo] = field(default_factory=list)
     status: str = "idle"
+    current_phase: str = "idle"
+    current_message: str = ""
+    current_retrieval_version_id: int | None = None
+    current_draft_version_id: int | None = None
 
 
 def to_dict(value: Any) -> Any:

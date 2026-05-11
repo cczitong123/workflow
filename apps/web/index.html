@@ -14,16 +14,46 @@
       </div>
       <div class="controls">
         <select id="epicSelect"></select>
-        <button id="loadButton">Generate</button>
+        <button id="loadButton" class="button-primary">Generate Draft</button>
       </div>
     </header>
 
+    <section class="status-banner is-idle" id="statusBanner" aria-live="polite">
+      <div class="status-spinner" id="statusSpinner" aria-hidden="true"></div>
+      <div>
+        <strong id="statusTitle">Ready</strong>
+        <p id="statusMessage">Select an Epic and generate a draft.</p>
+      </div>
+    </section>
+
     <main class="workspace" id="workspace">
       <section class="panel" data-panel="left">
-        <h2>Epic Context</h2>
-        <pre id="description" class="content"></pre>
+        <div class="panel-header">
+          <div>
+            <h2>Context &amp; Retrieval</h2>
+            <p class="subtle">Input context, retrieval understanding, and code evidence.</p>
+          </div>
+        </div>
+        <h3>Epic Context</h3>
+        <pre id="description" class="content placeholder-block">Waiting for Epic context...</pre>
         <h3>Retrieval Intent</h3>
-        <pre id="intent" class="content"></pre>
+        <pre id="intent" class="content placeholder-block">Waiting for retrieval intent...</pre>
+        <h3>Code Evidence</h3>
+        <ul id="evidenceList" class="list empty-state-list">
+          <li class="empty-state">Waiting for code evidence...</li>
+        </ul>
+        <div class="action-group">
+          <div class="action-heading">
+            <h3>Retrieval Actions</h3>
+            <details class="info-popover">
+              <summary>?</summary>
+              <div class="info-popover-body">
+                Re-run Retrieval rebuilds retrieval intent, retrieval query, and code evidence using the latest answers and notes. Suggested files and the regenerated draft may change.
+              </div>
+            </details>
+          </div>
+          <button id="rerunButton" class="button-secondary">Re-run Retrieval</button>
+        </div>
       </section>
 
       <div
@@ -35,10 +65,16 @@
       ></div>
 
       <section class="panel" data-panel="center">
-        <h2>Generated What to Do</h2>
+        <div class="panel-header">
+          <div>
+            <h2>Generated What to Do</h2>
+            <p class="subtle" id="versionMeta">No draft generated yet.</p>
+          </div>
+        </div>
+        <div class="editor-state" id="draftWaiting">Waiting for draft generation...</div>
         <textarea id="draftEditor" class="editor"></textarea>
         <div class="button-row">
-          <button id="confirmButton">Confirm</button>
+          <button id="confirmButton" class="button-primary">Confirm</button>
         </div>
       </section>
 
@@ -51,14 +87,34 @@
       ></div>
 
       <section class="panel" data-panel="right">
-        <h2>Evidence</h2>
-        <ul id="evidenceList" class="list"></ul>
+        <div class="panel-header">
+          <div>
+            <h2>Review &amp; History</h2>
+            <p class="subtle">Resolve questions, refine the draft, and manage versions.</p>
+          </div>
+        </div>
         <h3>Open Questions</h3>
-        <ul id="questionList" class="list"></ul>
+        <ul id="questionList" class="list empty-state-list">
+          <li class="empty-state">Waiting for open questions...</li>
+        </ul>
+        <div class="action-heading">
+          <h3>Refine Draft</h3>
+          <details class="info-popover">
+            <summary>?</summary>
+            <div class="info-popover-body">
+              Refine Draft updates the current draft using the latest note and answered questions without rebuilding code evidence.
+            </div>
+          </details>
+        </div>
+        <p class="subtle section-guidance">Answer open questions or add reviewer guidance before refining the current draft.</p>
         <textarea id="refineInput" class="editor short" placeholder="Add reviewer guidance or answer a question..."></textarea>
-        <button id="refineButton">Refine</button>
+        <button id="refineButton" class="button-primary">Refine Draft</button>
+        <h3>Version History</h3>
+        <ul id="versionList" class="list versions empty-state-list">
+          <li class="empty-state">No versions yet.</li>
+        </ul>
         <h3>Historical What-to-Do</h3>
-        <pre id="groundTruth" class="content"></pre>
+        <pre id="groundTruth" class="content placeholder-block">No historical reference available.</pre>
       </section>
     </main>
 

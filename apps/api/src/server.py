@@ -18,14 +18,21 @@ from modules.integrations.llm_adapter import (
     refine_draft,
 )
 from modules.sessions.store import SessionStore
-from modules.shared.models import RetrievalIntent, to_dict
+from modules.shared.models import (
+    FileChange,
+    OpenQuestion,
+    RetrievalIntent,
+    Step,
+    WhatToDoDraft,
+    to_dict,
+)
 
 
 ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_WEB_DIR = ROOT / "apps" / "web"
 
 EPICS: EpicRepository | None = None
-SESSIONS = SessionStore()
+SESSIONS: SessionStore | None = None
 WEB_DIR = DEFAULT_WEB_DIR
 APP_CONFIG: AppConfig | None = None
 
@@ -55,13 +62,76 @@ def log_config_summary(config: AppConfig) -> None:
     log_event("BOOT", f"llm.client_secret={_mask_presence(config.llm_api.client_secret)}")
     log_event("BOOT", f"llm.access_token={_mask_presence(config.llm_api.access_token)}")
     log_event("BOOT", f"code_rag.mode={config.code_rag.mode}")
+    log_event("BOOT", f"code_rag.device={config.code_rag.device or 'missing'}")
     log_event("BOOT", f"code_rag.embedding_model_path={config.code_rag.embedding_model_path or 'missing'}")
     log_event("BOOT", f"code_rag.vector_store_path={config.code_rag.vector_store_path or 'missing'}")
 
 
+def _draft_from_payload(payload: dict, fallback_version: int) -> WhatToDoDraft:
+    steps = [
+        Step(
+            condition=str(item.get("condition", "")),
+            actions=[str(action) for action in item.get("actions", [])],
+        )
+        for item in payload.get("steps", [])
+    ]
+    files_to_change = [
+        FileChange(
+            path=str(item.get("path", "")),
+            reason=str(item.get("reason", "")),
+        )
+        for item in payload.get("files_to_change", [])
+    ]
+    open_questions = [
+        OpenQuestion(
+            id=str(item.get("id", "")),
+            question=str(item.get("question", "")),
+            reason=str(item.get("reason", "")),
+            status=str(item.get("status", "open")),
+            answer=item.get("answer"),
+        )
+        for item in payload.get("open_questions", [])
+    ]
+    return WhatToDoDraft(
+        version=int(payload.get("version", fallback_version)),
+        steps=steps,
+        files_to_change=files_to_change,
+        open_questions=open_questions,
+        raw_text=str(payload.get("raw_text", "")),
+        summary=str(payload.get("summary", "")),
+    )
+
+
+def _sync_manual_draft_if_needed(session, payload: dict) -> None:
+    if SESSIONS is None or session.draft is None:
+        return
+    current_draft_payload = payload.get("currentDraft")
+    if not isinstance(current_draft_payload, dict):
+        return
+    updated_draft = _draft_from_payload(current_draft_payload, session.draft.version)
+    if updated_draft.raw_text == session.draft.raw_text:
+        return
+    updated_draft.version = session.draft.version + 1
+    session.draft = updated_draft
+    session.draft_history.append(updated_draft)
+    draft_version_id = SESSIONS.save_draft_version(
+        session,
+        updated_draft,
+        source_type="manual_edit",
+        retrieval_version_id=session.current_retrieval_version_id,
+    )
+    SESSIONS.save_user_event(
+        session.id,
+        "manual_edit",
+        "user",
+        {"draftVersionId": draft_version_id},
+    )
+    log_event("DRAFT", f"Session {session.id} saved manual editor changes as version_id={draft_version_id}")
+
+
 class AppHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
-        if EPICS is None:
+        if EPICS is None or SESSIONS is None:
             self._json({"error": "Epic repository is not configured."}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
             return
         parsed = urlparse(self.path)
@@ -75,6 +145,36 @@ class AppHandler(BaseHTTPRequestHandler):
                     }
                     for record in EPICS.list_epics()
                 ]
+            )
+            return
+
+        if parsed.path.startswith("/api/sessions/") and parsed.path.endswith("/versions"):
+            session_id = parsed.path.split("/")[-2]
+            session = SESSIONS.get(session_id)
+            self._json(
+                {
+                    "sessionId": session.id,
+                    "currentDraftVersionId": session.current_draft_version_id,
+                    "versions": to_dict(SESSIONS.list_draft_versions(session_id)),
+                }
+            )
+            return
+
+        if parsed.path.startswith("/api/sessions/"):
+            session_id = parsed.path.split("/")[-1]
+            session = SESSIONS.get(session_id)
+            self._json(
+                {
+                    "sessionId": session.id,
+                    "status": session.status,
+                    "currentPhase": session.current_phase,
+                    "currentMessage": session.current_message,
+                    "currentDraftVersionId": session.current_draft_version_id,
+                    "currentRetrievalVersionId": session.current_retrieval_version_id,
+                    "retrievalIntent": to_dict(session.retrieval_intent) if session.retrieval_intent else None,
+                    "evidence": to_dict(session.evidence),
+                    "draft": to_dict(session.draft) if session.draft else None,
+                }
             )
             return
 
@@ -107,7 +207,7 @@ class AppHandler(BaseHTTPRequestHandler):
         self.send_error(HTTPStatus.NOT_FOUND)
 
     def do_POST(self) -> None:
-        if EPICS is None:
+        if EPICS is None or SESSIONS is None:
             self._json({"error": "Epic repository is not configured."}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
             return
         parsed = urlparse(self.path)
@@ -136,6 +236,12 @@ class AppHandler(BaseHTTPRequestHandler):
                     self._json({"error": "Application config is not loaded."}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                     return
 
+                SESSIONS.update_runtime_state(
+                    session,
+                    status="generating",
+                    phase="generating_retrieval_intent",
+                    message="Generating retrieval intent...",
+                )
                 log_event("STEP-1", "Building retrieval intent")
                 summary, technical_intent, keywords, suspected_areas, query = build_retrieval_intent(
                     session.input_description,
@@ -152,11 +258,31 @@ class AppHandler(BaseHTTPRequestHandler):
                     "STEP-1",
                     f"Retrieval intent ready. keywords={len(keywords)} suspected_areas={len(suspected_areas)} query_chars={len(query)}",
                 )
+                session.retrieval_intent = intent
 
+                SESSIONS.update_runtime_state(
+                    session,
+                    status="generating",
+                    phase="retrieving_code_evidence",
+                    message="Searching code evidence...",
+                )
                 log_event("STEP-2", "Retrieving code evidence")
                 evidence = retrieve_code_evidence(intent, APP_CONFIG.code_rag)
                 log_event("STEP-2", f"Code evidence ready. items={len(evidence)}")
+                session.evidence = evidence
+                retrieval_version_id = SESSIONS.save_retrieval_snapshot(
+                    session,
+                    intent,
+                    evidence,
+                    trigger_source="initial_generate",
+                )
 
+                SESSIONS.update_runtime_state(
+                    session,
+                    status="generating",
+                    phase="collecting_references",
+                    message="Collecting historical references...",
+                )
                 log_event("STEP-3", "Collecting historical references")
                 reference_records = [
                     record.parsed_what_to_do
@@ -166,6 +292,12 @@ class AppHandler(BaseHTTPRequestHandler):
                 references = [record for record in reference_records if record.steps or record.files_to_change][:3]
                 log_event("STEP-3", f"Historical references ready. items={len(references)}")
 
+                SESSIONS.update_runtime_state(
+                    session,
+                    status="generating",
+                    phase="drafting",
+                    message="Drafting What to Do...",
+                )
                 log_event("STEP-4", "Generating draft")
                 draft = generate_draft(
                     session.input_description,
@@ -180,7 +312,18 @@ class AppHandler(BaseHTTPRequestHandler):
                 session.reference_samples = references
                 session.draft = draft
                 session.draft_history.append(draft)
-                session.status = "generated"
+                SESSIONS.save_draft_version(
+                    session,
+                    draft,
+                    source_type="initial_generate",
+                    retrieval_version_id=retrieval_version_id,
+                )
+                SESSIONS.update_runtime_state(
+                    session,
+                    status="generated",
+                    phase="done",
+                    message="Draft generated.",
+                )
 
                 ground_truth = EPICS.get_epic(session.epic_id).parsed_what_to_do
                 log_event("GENERATE", f"Session {session_id} completed successfully")
@@ -206,12 +349,36 @@ class AppHandler(BaseHTTPRequestHandler):
                 if APP_CONFIG is None:
                     self._json({"error": "Application config is not loaded."}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                     return
+                _sync_manual_draft_if_needed(session, payload)
                 user_message = payload.get("userMessage", "")
                 answered = payload.get("answeredQuestions", [])
+                SESSIONS.save_user_event(
+                    session.id,
+                    "refine_request",
+                    "user",
+                    {"userMessage": user_message, "answeredQuestions": answered},
+                )
+                SESSIONS.update_runtime_state(
+                    session,
+                    status="refining",
+                    phase="refining",
+                    message="Refining draft...",
+                )
                 draft = refine_draft(session.draft, user_message, answered, APP_CONFIG.llm_api)
                 session.draft = draft
                 session.draft_history.append(draft)
-                session.status = "refining"
+                SESSIONS.save_draft_version(
+                    session,
+                    draft,
+                    source_type="refine",
+                    retrieval_version_id=session.current_retrieval_version_id,
+                )
+                SESSIONS.update_runtime_state(
+                    session,
+                    status="generated",
+                    phase="done",
+                    message="Draft refined.",
+                )
                 log_event("REFINE", f"Session {session_id} refine completed. version={draft.version}")
                 self._json(
                     {
@@ -224,10 +391,159 @@ class AppHandler(BaseHTTPRequestHandler):
                 )
                 return
 
+            if parsed.path.endswith("/rerun-retrieval"):
+                session_id = parsed.path.split("/")[-2]
+                session = SESSIONS.get(session_id)
+                log_event("RERUN", f"Session {session_id} retrieval rerun started")
+                if APP_CONFIG is None:
+                    self._json({"error": "Application config is not loaded."}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                    return
+                _sync_manual_draft_if_needed(session, payload)
+                user_message = payload.get("userMessage", "")
+                answered = payload.get("answeredQuestions", [])
+                answer_lines = [f"- {item.get('id')}: {item.get('answer')}" for item in answered if item.get("answer")]
+                additional_context_parts = [session.input_description]
+                if user_message.strip():
+                    additional_context_parts.extend(["", "Latest user guidance:", user_message.strip()])
+                if answer_lines:
+                    additional_context_parts.extend(["", "Answered questions:", *answer_lines])
+                augmented_description = "\n".join(additional_context_parts)
+                SESSIONS.save_user_event(
+                    session.id,
+                    "rerun_retrieval",
+                    "user",
+                    {"userMessage": user_message, "answeredQuestions": answered},
+                )
+
+                SESSIONS.update_runtime_state(
+                    session,
+                    status="rerunning_retrieval",
+                    phase="generating_retrieval_intent",
+                    message="Generating retrieval intent...",
+                )
+                summary, technical_intent, keywords, suspected_areas, query = build_retrieval_intent(
+                    augmented_description,
+                    APP_CONFIG.llm_api,
+                )
+                intent = RetrievalIntent(
+                    summary=summary,
+                    technical_intent=technical_intent,
+                    keywords=keywords,
+                    suspected_areas=suspected_areas,
+                    query=query,
+                )
+                session.retrieval_intent = intent
+
+                SESSIONS.update_runtime_state(
+                    session,
+                    status="rerunning_retrieval",
+                    phase="retrieving_code_evidence",
+                    message="Searching code evidence...",
+                )
+                evidence = retrieve_code_evidence(intent, APP_CONFIG.code_rag)
+                session.evidence = evidence
+                retrieval_version_id = SESSIONS.save_retrieval_snapshot(
+                    session,
+                    intent,
+                    evidence,
+                    trigger_source="rerun_retrieval",
+                )
+
+                SESSIONS.update_runtime_state(
+                    session,
+                    status="rerunning_retrieval",
+                    phase="drafting",
+                    message="Drafting What to Do...",
+                )
+                reference_records = [
+                    record.parsed_what_to_do
+                    for record in EPICS.list_epics()
+                    if record.source.id != session.epic_id and record.parsed_what_to_do is not None
+                ]
+                references = [record for record in reference_records if record.steps or record.files_to_change][:3]
+                draft = generate_draft(
+                    augmented_description,
+                    evidence,
+                    references,
+                    APP_CONFIG.llm_api,
+                )
+
+                session.retrieval_intent = intent
+                session.evidence = evidence
+                session.reference_samples = references
+                session.draft = draft
+                session.draft_history.append(draft)
+                SESSIONS.save_draft_version(
+                    session,
+                    draft,
+                    source_type="rerun_retrieval",
+                    retrieval_version_id=retrieval_version_id,
+                )
+                SESSIONS.update_runtime_state(
+                    session,
+                    status="generated",
+                    phase="done",
+                    message="Retrieval rerun completed.",
+                )
+                self._json(
+                    {
+                        "retrievalIntent": to_dict(intent),
+                        "evidence": to_dict(evidence),
+                        "draft": to_dict(draft),
+                    }
+                )
+                return
+
+            if "/restore/" in parsed.path:
+                parts = parsed.path.split("/")
+                session_id = parts[-3]
+                version_id = int(parts[-1])
+                session = SESSIONS.get(session_id)
+                log_event("RESTORE", f"Session {session_id} restoring version id={version_id}")
+                SESSIONS.update_runtime_state(
+                    session,
+                    status="restoring_version",
+                    phase="restoring_version",
+                    message="Restoring selected version...",
+                )
+                draft, new_version_id = SESSIONS.restore_draft_version(session, version_id)
+                SESSIONS.save_user_event(
+                    session.id,
+                    "restore_version",
+                    "user",
+                    {"restoredFromVersionId": version_id, "newVersionId": new_version_id},
+                )
+                SESSIONS.update_runtime_state(
+                    session,
+                    status="generated",
+                    phase="done",
+                    message="Version restored.",
+                )
+                self._json(
+                    {
+                        "draft": to_dict(draft),
+                        "currentDraftVersionId": session.current_draft_version_id,
+                    }
+                )
+                return
+
             if parsed.path.endswith("/confirm"):
                 session_id = parsed.path.split("/")[-2]
                 session = SESSIONS.get(session_id)
-                session.status = "confirmed"
+                _sync_manual_draft_if_needed(session, payload)
+                SESSIONS.update_runtime_state(
+                    session,
+                    status="confirming",
+                    phase="confirming",
+                    message="Confirming final draft...",
+                )
+                SESSIONS.save_user_event(session.id, "confirm_session", "user", {})
+                SESSIONS.update_runtime_state(
+                    session,
+                    status="confirmed",
+                    phase="done",
+                    message="Final draft confirmed.",
+                )
                 log_event("CONFIRM", f"Session {session_id} confirmed")
                 self._json(
                     {
@@ -240,6 +556,18 @@ class AppHandler(BaseHTTPRequestHandler):
 
             self.send_error(HTTPStatus.NOT_FOUND)
         except Exception as exc:
+            if SESSIONS is not None and parsed.path.startswith("/api/sessions/"):
+                try:
+                    session_id = parsed.path.split("/")[3]
+                    session = SESSIONS.get(session_id)
+                    SESSIONS.update_runtime_state(
+                        session,
+                        status="error",
+                        phase="error",
+                        message=str(exc),
+                    )
+                except Exception:
+                    pass
             log_event("ERROR", f"{parsed.path} failed with {type(exc).__name__}: {exc}")
             self._json(
                 {
@@ -293,6 +621,7 @@ def configure_runtime(data_dir: Path) -> None:
     global EPICS
     global WEB_DIR
     global APP_CONFIG
+    global SESSIONS
 
     if not data_dir.exists():
         raise FileNotFoundError(f"Epic data directory does not exist: {data_dir}")
@@ -306,6 +635,7 @@ def configure_runtime(data_dir: Path) -> None:
     APP_CONFIG = load_app_config()
     log_config_summary(APP_CONFIG)
     EPICS = EpicRepository(data_dir)
+    SESSIONS = SessionStore(APP_CONFIG.storage_db_path)
     WEB_DIR = DEFAULT_WEB_DIR
 
 

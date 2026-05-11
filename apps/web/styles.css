@@ -20,6 +20,54 @@ body {
   color: #f4fbf8;
 }
 
+.status-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 32px;
+  border-bottom: 1px solid rgba(19, 60, 85, 0.1);
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(12px);
+}
+
+.status-banner p,
+.status-banner strong {
+  margin: 0;
+}
+
+.status-banner.is-idle {
+  color: #264653;
+}
+
+.status-banner.is-busy {
+  color: #133c55;
+}
+
+.status-banner.is-error {
+  color: #8f2d2d;
+  background: rgba(255, 239, 238, 0.9);
+}
+
+.status-spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 2px solid rgba(19, 60, 85, 0.2);
+  border-top-color: #133c55;
+  opacity: 0;
+}
+
+.status-banner.is-busy .status-spinner {
+  opacity: 1;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .topbar h1,
 .topbar p {
   margin: 0;
@@ -34,7 +82,8 @@ body {
 .controls select,
 .controls button,
 .button-row button,
-#refineButton {
+#refineButton,
+#rerunButton {
   border: 0;
   border-radius: 10px;
   padding: 10px 14px;
@@ -43,10 +92,41 @@ body {
 
 .controls button,
 .button-row button,
-#refineButton {
+#refineButton,
+#rerunButton,
+.version-actions button {
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
+}
+
+.controls button:hover,
+.button-row button:hover,
+#refineButton:hover,
+#rerunButton:hover,
+.version-actions button:hover {
+  transform: translateY(-1px);
+}
+
+.controls button:disabled,
+.button-row button:disabled,
+#refineButton:disabled,
+#rerunButton:disabled,
+.version-actions button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+  transform: none;
+}
+
+.button-primary {
   background: #5c7457;
   color: #fff;
-  cursor: pointer;
+  box-shadow: 0 8px 20px rgba(92, 116, 87, 0.18);
+}
+
+.button-secondary {
+  background: #eef4f1;
+  color: #133c55;
+  border: 1px solid rgba(19, 60, 85, 0.15);
 }
 
 .workspace {
@@ -106,6 +186,74 @@ body {
   margin-top: 0;
 }
 
+.panel h3 {
+  margin-bottom: 10px;
+}
+
+.panel-header,
+.action-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.subtle {
+  margin: 4px 0 0;
+  color: #476072;
+  font-size: 13px;
+}
+
+.action-group {
+  margin-top: 18px;
+}
+
+.section-guidance {
+  margin: -4px 0 10px;
+}
+
+.info-popover {
+  position: relative;
+}
+
+.info-popover summary {
+  list-style: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #133c55;
+  color: #fff;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.info-popover summary::-webkit-details-marker {
+  display: none;
+}
+
+.info-popover[open] .info-popover-body {
+  display: block;
+}
+
+.info-popover-body {
+  display: none;
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  width: 260px;
+  padding: 12px;
+  border-radius: 12px;
+  background: #0f2735;
+  color: #eef6f3;
+  font-size: 13px;
+  line-height: 1.45;
+  box-shadow: 0 10px 24px rgba(17, 33, 45, 0.18);
+}
+
 .content,
 .editor {
   width: 100%;
@@ -127,6 +275,10 @@ body {
   overflow: auto;
 }
 
+.placeholder-block {
+  color: #6f8796;
+}
+
 .editor {
   min-height: 420px;
   resize: vertical;
@@ -137,6 +289,16 @@ body {
   min-height: 100px;
 }
 
+.editor-state {
+  margin-bottom: 10px;
+  border-radius: 12px;
+  border: 1px dashed #c7d7d1;
+  background: rgba(249, 252, 251, 0.85);
+  padding: 14px 16px;
+  color: #6f8796;
+  font-size: 14px;
+}
+
 .list {
   padding-left: 18px;
   max-height: 220px;
@@ -145,6 +307,46 @@ body {
 
 .list li {
   margin-bottom: 10px;
+}
+
+.empty-state-list {
+  padding-left: 0;
+  list-style: none;
+}
+
+.empty-state {
+  color: #6f8796;
+  border: 1px dashed #c7d7d1;
+  background: rgba(249, 252, 251, 0.85);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+
+.versions li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.version-meta {
+  display: block;
+  color: #476072;
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.version-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.version-actions button {
+  border: 1px solid rgba(19, 60, 85, 0.14);
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: #f4f8f6;
+  color: #133c55;
 }
 
 .button-row {

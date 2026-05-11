@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 
 from config import LlmApiConfig
 from prompt_loader import load_fewshot_examples, render_prompt
@@ -17,6 +18,9 @@ from modules.shared.models import (
 
 def _log(message: str) -> None:
     print(f"[AGENTIC-WORKFLOW][LLM] {message}", flush=True)
+
+
+_TOKEN_CACHE: dict[str, dict[str, float | str]] = {}
 
 
 def build_retrieval_intent(description: str, config: LlmApiConfig) -> tuple[str, str, list[str], list[str], str]:
@@ -366,6 +370,13 @@ def _call_remote_chat(prompt: str, config: LlmApiConfig) -> str:
 
 
 def _get_access_token(config: LlmApiConfig, httpx_module) -> str:
+    cache_key = f"{config.auth_url}|{config.client_id}"
+    cached = _TOKEN_CACHE.get(cache_key)
+    now = time.time()
+    if cached and isinstance(cached.get("expires_at"), float) and cached["expires_at"] > now:
+        _log("Reusing cached M2M token")
+        return str(cached["token"])
+
     if not config.client_id or not config.client_secret or not config.auth_url:
         raise RuntimeError(
             "Remote LLM mode requires either AGENTIC_WORKFLOW_LLM_ACCESS_TOKEN or the full M2M config: "
@@ -398,6 +409,12 @@ def _get_access_token(config: LlmApiConfig, httpx_module) -> str:
         token = response_body.get("access_token")
     if not token:
         raise RuntimeError("Empty access_token from M2M auth response.")
+    expires_in = int(response_body.get("expires_in", 0) or 0)
+    expires_at = now + max(expires_in - 60, 60)
+    _TOKEN_CACHE[cache_key] = {
+        "token": str(token),
+        "expires_at": float(expires_at),
+    }
     _log("M2M token acquired successfully")
     return token
 

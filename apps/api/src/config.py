@@ -49,6 +49,7 @@ USER_SERVER = {
 USER_PATHS = {
     "epic_data_dir": "./data/epics",
     "prompt_dir": "./apps/api/src/prompts",
+    "storage_db_path": "./data/agentic_workflow.sqlite3",
 }
 
 DEFAULT_CODE_RAG = {
@@ -146,6 +147,7 @@ class AppConfig:
     host: str
     port: int
     prompt_dir: Path
+    storage_db_path: Path
     epic_data: EpicDataConfig
     code_rag: CodeRagConfig
     llm_api: LlmApiConfig
@@ -174,11 +176,13 @@ def _env(name: str, default: str) -> str:
 def load_app_config() -> AppConfig:
     data_dir = _resolve_path(_env("EPIC_DATA_DIR", USER_PATHS["epic_data_dir"]))
     prompt_dir = _resolve_path(_env("PROMPT_DIR", USER_PATHS["prompt_dir"]))
+    storage_db_path = _resolve_path(_env("STORAGE_DB_PATH", USER_PATHS["storage_db_path"]))
 
     return AppConfig(
         host=_env("HOST", USER_SERVER["host"]),
         port=int(_env("PORT", str(USER_SERVER["port"]))),
         prompt_dir=prompt_dir,
+        storage_db_path=storage_db_path,
         epic_data=EpicDataConfig(data_dir=data_dir),
         code_rag=CodeRagConfig(
             mode=_env("CODE_RAG_MODE", DEFAULT_CODE_RAG["mode"]),
