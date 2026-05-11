@@ -178,35 +178,71 @@ function renderEvidence(items) {
   const list = document.getElementById("evidenceList");
   list.innerHTML = "";
   if (!items || items.length === 0) {
-    const node = document.createElement("li");
-    node.className = "empty-state";
-    node.textContent = "Waiting for code evidence...";
-    list.appendChild(node);
+    list.classList.remove("is-filled");
+    list.classList.add("is-empty");
     return;
   }
+  list.classList.remove("is-empty");
+  list.classList.add("is-filled");
   items.forEach((item) => {
     const node = document.createElement("li");
-    node.textContent = `${item.path}: ${item.suggestedChange}`;
+    node.textContent = item.path;
     list.appendChild(node);
   });
 }
 
 function renderIntent(intent) {
-  document.getElementById("intent").textContent = intent
-    ? JSON.stringify(intent, null, 2)
-    : "Waiting for retrieval intent...";
+  const container = document.getElementById("intent");
+  container.innerHTML = "";
+  if (!intent) {
+    container.classList.remove("is-filled");
+    container.classList.add("is-empty");
+    return;
+  }
+  container.classList.remove("is-empty");
+  container.classList.add("is-filled");
+
+  const cards = document.createElement("div");
+  cards.className = "intent-cards";
+
+  const entries = [
+    ["Summary", intent.summary || ""],
+    ["Technical Intent", intent.technical_intent || ""],
+    ["Keywords", Array.isArray(intent.keywords) ? intent.keywords.join(", ") : ""],
+    ["Suspected Areas", Array.isArray(intent.suspected_areas) ? intent.suspected_areas.join("\n") : ""],
+    ["Retrieval Query", intent.query || ""],
+  ].filter(([, value]) => value && String(value).trim());
+
+  entries.forEach(([label, value]) => {
+    const card = document.createElement("div");
+    card.className = "intent-card";
+
+    const title = document.createElement("span");
+    title.className = "intent-card-label";
+    title.textContent = label;
+
+    const body = document.createElement("div");
+    body.className = "intent-card-value";
+    body.textContent = value;
+
+    card.appendChild(title);
+    card.appendChild(body);
+    cards.appendChild(card);
+  });
+
+  container.appendChild(cards);
 }
 
 function renderQuestions(items) {
   const list = document.getElementById("questionList");
   list.innerHTML = "";
   if (!items || items.length === 0) {
-    const node = document.createElement("li");
-    node.className = "empty-state";
-    node.textContent = "Waiting for open questions...";
-    list.appendChild(node);
+    list.classList.remove("is-filled");
+    list.classList.add("is-empty");
     return;
   }
+  list.classList.remove("is-empty");
+  list.classList.add("is-filled");
   items.forEach((item) => {
     const node = document.createElement("li");
     const answer = item.answer ? ` Answer: ${item.answer}` : "";
@@ -218,7 +254,7 @@ function renderQuestions(items) {
 function renderDraft(draft) {
   currentDraft = draft;
   document.getElementById("draftEditor").value = draft?.raw_text || "";
-  document.getElementById("draftWaiting").style.display = draft ? "none" : "block";
+  document.getElementById("draftWaiting").style.display = draft ? "none" : "none";
   renderQuestions(draft?.open_questions || []);
 }
 
@@ -237,10 +273,10 @@ function syncDraftFromEditor() {
 function renderVersionMeta() {
   const node = document.getElementById("versionMeta");
   if (!currentDraft) {
-    node.textContent = "No draft generated yet.";
+    node.textContent = "";
     return;
   }
-  node.textContent = `Version ${currentDraft.version}${currentDraft.summary ? ` • ${currentDraft.summary}` : ""}`;
+  node.textContent = `Version ${currentDraft.version}`;
 }
 
 async function loadVersions() {
@@ -257,12 +293,12 @@ function renderVersions() {
   const list = document.getElementById("versionList");
   list.innerHTML = "";
   if (!currentVersions || currentVersions.length === 0) {
-    const node = document.createElement("li");
-    node.className = "empty-state";
-    node.textContent = "No versions yet.";
-    list.appendChild(node);
+    list.classList.remove("is-filled");
+    list.classList.add("is-empty");
     return;
   }
+  list.classList.remove("is-empty");
+  list.classList.add("is-filled");
   currentVersions.forEach((version) => {
     const node = document.createElement("li");
 
@@ -299,6 +335,71 @@ function collectRefinePayload() {
   return { userMessage, answeredQuestions };
 }
 
+function setListEmptyState(elementId, message) {
+  const list = document.getElementById(elementId);
+  list.innerHTML = "";
+  list.classList.remove("is-filled");
+  list.classList.add("is-empty");
+  if (!message) {
+    return;
+  }
+  const node = document.createElement("li");
+  node.className = "empty-state";
+  node.textContent = message;
+  list.appendChild(node);
+}
+
+function resetWorkspace({ showWaiting = false } = {}) {
+  renderIntent(null);
+  renderEvidence([]);
+  currentDraft = null;
+  currentDraftVersionId = null;
+  currentVersions = [];
+  document.getElementById("draftEditor").value = "";
+  document.getElementById("draftWaiting").textContent = showWaiting
+    ? "Waiting for draft generation..."
+    : "";
+  document.getElementById("draftWaiting").style.display = showWaiting ? "block" : "none";
+  const description = document.getElementById("description");
+  description.textContent = showWaiting ? "Waiting for Epic context..." : "";
+  description.classList.remove("is-filled");
+  description.classList.add("is-empty");
+  document.getElementById("intent").textContent = showWaiting
+    ? "Waiting for retrieval intent..."
+    : "";
+  const groundTruth = document.getElementById("groundTruth");
+  groundTruth.textContent = "";
+  groundTruth.classList.remove("is-filled");
+  groundTruth.classList.add("is-empty");
+  setListEmptyState(
+    "evidenceList",
+    showWaiting ? "Waiting for code evidence..." : "",
+  );
+  setListEmptyState(
+    "questionList",
+    showWaiting ? "Waiting for open questions..." : "",
+  );
+  setListEmptyState(
+    "versionList",
+    showWaiting ? "No versions yet." : "",
+  );
+  renderVersionMeta();
+}
+
+function renderDescription(text) {
+  const description = document.getElementById("description");
+  description.textContent = text || "";
+  description.classList.toggle("is-filled", Boolean(text));
+  description.classList.toggle("is-empty", !text);
+}
+
+function renderHistoricalReference(text) {
+  const groundTruth = document.getElementById("groundTruth");
+  groundTruth.textContent = text || "";
+  groundTruth.classList.toggle("is-filled", Boolean(text));
+  groundTruth.classList.toggle("is-empty", !text);
+}
+
 async function loadEpics() {
   const epics = await fetchJson("/api/epics");
   const select = document.getElementById("epicSelect");
@@ -317,20 +418,11 @@ async function generate() {
 
   try {
     const epic = await fetchJson(`/api/epics/${epicId}`);
-    document.getElementById("description").textContent = epic.description || "";
-    document.getElementById("groundTruth").textContent = epic.parsedWhatToDo
+    resetWorkspace({ showWaiting: true });
+    renderDescription(epic.description || "");
+    renderHistoricalReference(epic.parsedWhatToDo
       ? JSON.stringify(epic.parsedWhatToDo, null, 2)
-      : "No historical reference available.";
-    renderIntent(null);
-    renderEvidence([]);
-    currentDraft = null;
-    currentDraftVersionId = null;
-    currentVersions = [];
-    document.getElementById("draftEditor").value = "";
-    document.getElementById("draftWaiting").style.display = "block";
-    document.getElementById("questionList").innerHTML = "";
-    document.getElementById("versionList").innerHTML = "";
-    renderVersionMeta();
+      : "");
 
     const session = await fetchJson("/api/sessions", {
       method: "POST",
@@ -493,6 +585,7 @@ document.getElementById("draftEditor").addEventListener("input", () => {
 
 loadSavedPanelWidths();
 setupResizablePanels();
+resetWorkspace({ showWaiting: false });
 loadEpics().catch((error) => {
   setStatus({ title: "Error", message: error.message, variant: "error", busy: false });
   document.getElementById("description").textContent = error.message;
