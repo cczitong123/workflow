@@ -266,16 +266,17 @@ class AppHandler(BaseHTTPRequestHandler):
 
             if parsed.path == "/api/sessions":
                 source_type = str(payload.get("sourceType", "local"))
-                if source_type == "jira":
-                    epic_payload = payload.get("epic")
-                    if not isinstance(epic_payload, dict):
-                        self._json({"error": "A Jira Epic payload is required."}, status=HTTPStatus.BAD_REQUEST)
-                        return
-                    epic_id = epic_payload.get("id", "jira-epic")
-                    log_event("SESSION", f"Creating Jira session for epic={epic_id}")
+                epic_payload = payload.get("epic")
+                if isinstance(epic_payload, dict):
+                    epic_id = epic_payload.get("id", f"{source_type}-epic")
+                    log_event("SESSION", f"Creating imported session for epic={epic_id} source={source_type}")
                     from modules.epics.repository import normalize_epic_payload
 
                     record = normalize_epic_payload(epic_payload)
+                elif source_type == "jira":
+                    epic_payload = payload.get("epic")
+                    self._json({"error": "A Jira Epic payload is required."}, status=HTTPStatus.BAD_REQUEST)
+                    return
                 else:
                     epic_id = payload["epicId"]
                     log_event("SESSION", f"Creating session for epic={epic_id}")
@@ -288,6 +289,16 @@ class AppHandler(BaseHTTPRequestHandler):
                 )
                 log_event("SESSION", f"Session created id={session.id}")
                 self._json({"sessionId": session.id})
+                return
+
+            if parsed.path == "/api/epics/normalize":
+                epic_payload = payload.get("epic")
+                if not isinstance(epic_payload, dict):
+                    self._json({"error": "An Epic payload is required."}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                from modules.epics.repository import normalize_epic_payload
+
+                self._json(_serialize_epic_record(normalize_epic_payload(epic_payload)))
                 return
 
             if parsed.path.endswith("/generate"):

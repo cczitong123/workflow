@@ -43,13 +43,14 @@ class JiraEpicProvider:
             "GET",
             "/rest/api/2/project",
         )
+        visible_keys = set(self.config.visible_project_keys)
         projects = [
             {
                 "key": item.get("key", ""),
                 "name": item.get("name", ""),
             }
             for item in data
-            if item.get("key")
+            if item.get("key") and (not visible_keys or item.get("key", "").upper() in visible_keys)
         ]
         projects.sort(key=lambda item: item["key"])
         return projects[: self.config.project_list_limit]

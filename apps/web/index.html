@@ -13,7 +13,7 @@
         <p>Offline MVP for description -> evidence -> draft -> refine.</p>
       </div>
       <div class="controls">
-        <select id="epicSelect"></select>
+        <div id="currentEpicBadge" class="current-epic-badge">Current Epic: None selected</div>
         <button id="jiraImportButton" class="button-secondary">Import from Jira</button>
         <button id="loadButton" class="button-primary">Generate Draft</button>
       </div>
@@ -23,7 +23,7 @@
       <div class="status-spinner" id="statusSpinner" aria-hidden="true"></div>
       <div>
         <strong id="statusTitle">Ready</strong>
-        <p id="statusMessage">Select an Epic and generate a draft.</p>
+        <p id="statusMessage">Import an Epic from Jira and generate a draft.</p>
       </div>
     </section>
 
@@ -115,8 +115,8 @@
     </main>
 
     <div id="jiraModal" class="modal-backdrop hidden" aria-hidden="true">
-      <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="jiraModalTitle">
-        <div class="modal-header">
+      <section class="modal-card modal-card-large" role="dialog" aria-modal="true" aria-labelledby="jiraModalTitle">
+        <div class="modal-header modal-header-sticky">
           <div>
             <h2 id="jiraModalTitle">Import Epic from Jira</h2>
             <p class="modal-subtitle">

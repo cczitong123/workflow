@@ -57,6 +57,7 @@ DEFAULT_JIRA = {
     "personal_token": "",
     "epic_link_field": "customfield_10109",
     "parent_link_field": "customfield_10101",
+    "visible_project_keys": [],
     "project_list_limit": 500,
     "epic_list_limit": 200,
 }
@@ -157,6 +158,7 @@ class JiraConfig:
     personal_token: str
     epic_link_field: str
     parent_link_field: str
+    visible_project_keys: list[str]
     project_list_limit: int
     epic_list_limit: int
 
@@ -299,6 +301,14 @@ def load_app_config() -> AppConfig:
             personal_token=_env("JIRA_PERSONAL_TOKEN", DEFAULT_JIRA["personal_token"]),
             epic_link_field=_env("JIRA_EPIC_LINK_FIELD", DEFAULT_JIRA["epic_link_field"]),
             parent_link_field=_env("JIRA_PARENT_LINK_FIELD", DEFAULT_JIRA["parent_link_field"]),
+            visible_project_keys=[
+                item.strip().upper()
+                for item in _env(
+                    "JIRA_VISIBLE_PROJECT_KEYS",
+                    ",".join(DEFAULT_JIRA["visible_project_keys"]),
+                ).split(",")
+                if item.strip()
+            ],
             project_list_limit=int(
                 _env("JIRA_PROJECT_LIST_LIMIT", str(DEFAULT_JIRA["project_list_limit"]))
             ),

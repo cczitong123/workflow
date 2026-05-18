@@ -131,6 +131,41 @@ function applyBusyState({ generate = false, refine = false, rerun = false, confi
   document.getElementById("confirmButton").disabled = confirm;
 }
 
+function updateCurrentEpicBadge() {
+  const badge = document.getElementById("currentEpicBadge");
+  if (!currentImportedEpic) {
+    badge.textContent = "Current Epic: None selected";
+    badge.classList.add("is-empty");
+    document.getElementById("loadButton").disabled = true;
+    return;
+  }
+
+  badge.textContent = `Current Epic: ${currentImportedEpic.id}`;
+  badge.classList.remove("is-empty");
+  document.getElementById("loadButton").disabled = false;
+}
+
+function setCurrentEpic(epic, sourceType, message) {
+  currentImportedEpic = {
+    ...epic,
+    sourceType,
+  };
+  resetWorkspace({ showWaiting: false });
+  renderDescription(currentImportedEpic.description || "");
+  renderHistoricalReference(
+    currentImportedEpic.parsedWhatToDo
+      ? JSON.stringify(currentImportedEpic.parsedWhatToDo, null, 2)
+      : "",
+  );
+  updateCurrentEpicBadge();
+  setStatus({
+    title: "Ready",
+    message,
+    variant: "idle",
+    busy: false,
+  });
+}
+
 async function pollSessionStatus(sessionId) {
   if (!sessionId) {
     return;
@@ -420,34 +455,29 @@ function renderHistoricalReference(text) {
   groundTruth.classList.toggle("is-empty", !text);
 }
 
-async function loadEpics() {
-  const epics = await fetchJson("/api/epics");
-  const select = document.getElementById("epicSelect");
-  select.innerHTML = "";
-  epics.forEach((epic) => {
-    const option = document.createElement("option");
-    option.value = epic.id;
-    option.textContent = `${epic.id} - ${epic.title}`;
-    select.appendChild(option);
-  });
-}
-
 function getCurrentEpicInput() {
   if (currentImportedEpic) {
     return { sourceType: "jira", epic: currentImportedEpic };
   }
-  return { sourceType: "local", epicId: document.getElementById("epicSelect").value };
+  return null;
 }
 
 async function generate() {
   const epicInput = getCurrentEpicInput();
+  if (!epicInput) {
+    setStatus({
+      title: "Ready",
+        message: "Import an Epic from Jira before generating.",
+        variant: "idle",
+        busy: false,
+      });
+    return;
+  }
   setStatus({ title: "In Progress", message: "Preparing session...", variant: "busy", busy: true });
   applyBusyState({ generate: true, refine: true, rerun: true, confirm: true });
 
   try {
-    const epic = epicInput.sourceType === "jira"
-      ? epicInput.epic
-      : await fetchJson(`/api/epics/${epicInput.epicId}`);
+    const epic = epicInput.epic;
 
     resetWorkspace({ showWaiting: true });
     renderDescription(epic.description || "");
@@ -836,21 +866,12 @@ function useImportedJiraEpic() {
   if (!jiraState.selectedEpic) {
     return;
   }
-  currentImportedEpic = jiraState.selectedEpic;
-  resetWorkspace({ showWaiting: false });
-  renderDescription(currentImportedEpic.description || "");
-  renderHistoricalReference(
-    currentImportedEpic.parsedWhatToDo
-      ? JSON.stringify(currentImportedEpic.parsedWhatToDo, null, 2)
-      : "",
+  setCurrentEpic(
+    jiraState.selectedEpic,
+    "jira",
+    `Epic ${jiraState.selectedEpic.id} imported from Jira. Ready to generate.`,
   );
   closeJiraModal();
-  setStatus({
-    title: "Ready",
-    message: `Epic ${currentImportedEpic.id} imported from Jira. Ready to generate.`,
-    variant: "idle",
-    busy: false,
-  });
 }
 
 document.getElementById("loadButton").addEventListener("click", generate);
@@ -868,11 +889,13 @@ document.getElementById("jiraProjectSearch").addEventListener("input", filterJir
 document.getElementById("jiraEpicSearch").addEventListener("input", filterJiraEpics);
 document.getElementById("jiraLoadByKeyButton").addEventListener("click", loadJiraEpicByKey);
 document.getElementById("jiraUseEpicButton").addEventListener("click", useImportedJiraEpic);
-document.getElementById("epicSelect").addEventListener("change", () => {
-  currentImportedEpic = null;
-});
 document.getElementById("jiraModal").addEventListener("click", (event) => {
   if (event.target.id === "jiraModal") {
+    closeJiraModal();
+  }
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
     closeJiraModal();
   }
 });
@@ -880,8 +903,5 @@ document.getElementById("jiraModal").addEventListener("click", (event) => {
 loadSavedPanelWidths();
 setupResizablePanels();
 resetWorkspace({ showWaiting: false });
+updateCurrentEpicBadge();
 renderSelectedJiraEpic();
-loadEpics().catch((error) => {
-  setStatus({ title: "Error", message: error.message, variant: "error", busy: false });
-  document.getElementById("description").textContent = error.message;
-});

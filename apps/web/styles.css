@@ -76,10 +76,10 @@ body {
 .controls {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
 }
 
-.controls select,
 .controls button,
 .button-row button,
 #refineButton,
@@ -97,7 +97,9 @@ body {
 #refineButton,
 #rerunButton,
 .version-actions button,
-.icon-button {
+.icon-button,
+.button-primary,
+.button-secondary {
   cursor: pointer;
   transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
 }
@@ -106,7 +108,9 @@ body {
 .button-row button:hover,
 #refineButton:hover,
 #rerunButton:hover,
-.version-actions button:hover {
+.version-actions button:hover,
+.button-primary:hover,
+.button-secondary:hover {
   transform: translateY(-1px);
 }
 
@@ -114,7 +118,9 @@ body {
 .button-row button:disabled,
 #refineButton:disabled,
 #rerunButton:disabled,
-.version-actions button:disabled {
+.version-actions button:disabled,
+.button-primary:disabled,
+.button-secondary:disabled {
   opacity: 0.6;
   cursor: wait;
   transform: none;
@@ -130,6 +136,24 @@ body {
   background: #eef4f1;
   color: #133c55;
   border: 1px solid rgba(19, 60, 85, 0.15);
+}
+
+.current-epic-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 42px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #f4fbf8;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.current-epic-badge.is-empty {
+  opacity: 0.78;
 }
 
 .text-input {
@@ -493,21 +517,29 @@ body {
   background: rgba(12, 31, 43, 0.45);
   backdrop-filter: blur(6px);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  padding: 32px;
+  padding: 24px 32px 32px;
   z-index: 100;
 }
 
 .modal-card {
-  width: min(860px, 100%);
-  max-height: 86vh;
-  overflow: auto;
+  width: min(980px, 100%);
+  height: min(84vh, 860px);
+  min-width: 720px;
+  min-height: 620px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  resize: both;
   background: #fbfdfc;
   border: 1px solid rgba(19, 60, 85, 0.12);
   border-radius: 24px;
   box-shadow: 0 24px 56px rgba(17, 33, 45, 0.22);
-  padding: 24px 24px 20px;
+}
+
+.modal-card-large {
+  width: min(1040px, 100%);
 }
 
 .modal-header {
@@ -515,6 +547,12 @@ body {
   align-items: flex-start;
   justify-content: space-between;
   gap: 20px;
+  padding: 24px 24px 16px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #fbfdfc;
+  border-bottom: 1px solid rgba(19, 60, 85, 0.08);
 }
 
 .modal-header h2,
@@ -531,7 +569,7 @@ body {
 
 .modal-status {
   min-height: 24px;
-  margin: 16px 0 6px;
+  margin: 14px 24px 6px;
   color: #264653;
   font-size: 14px;
 }
@@ -547,6 +585,9 @@ body {
 .modal-body {
   display: grid;
   gap: 18px;
+  overflow: auto;
+  padding: 0 24px 20px;
+  min-height: 0;
 }
 
 .modal-section {
@@ -638,6 +679,16 @@ body {
   margin-top: 14px;
 }
 
+.modal-actions-start {
+  justify-content: flex-start;
+}
+
+.modal-actions-stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 14px;
+}
+
 .modal-helper {
   margin: 10px 0 0;
   color: #476072;
@@ -655,7 +706,8 @@ body {
   list-style: none;
   margin: 10px 0 0;
   padding: 0;
-  max-height: 180px;
+  max-height: 220px;
+  min-height: 48px;
   overflow: auto;
   border-radius: 12px;
   background: #e9f0ed;
@@ -702,6 +754,10 @@ body {
   padding: 14px 16px;
 }
 
+.compact-preview {
+  margin-bottom: 12px;
+}
+
 .selection-preview p {
   margin: 0 0 10px;
 }
@@ -713,6 +769,35 @@ body {
   overflow: auto;
   white-space: pre-wrap;
   color: #264653;
+}
+
+.drop-zone {
+  display: grid;
+  gap: 4px;
+  padding: 20px 18px;
+  border-radius: 14px;
+  border: 2px dashed rgba(92, 116, 87, 0.32);
+  background: rgba(255, 255, 255, 0.58);
+  color: #365041;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease, transform 0.12s ease;
+}
+
+.drop-zone strong,
+.drop-zone span {
+  pointer-events: none;
+}
+
+.drop-zone span {
+  color: #5a7483;
+  font-size: 14px;
+}
+
+.drop-zone:hover,
+.drop-zone.is-active {
+  border-color: rgba(92, 116, 87, 0.62);
+  background: rgba(255, 255, 255, 0.82);
+  transform: translateY(-1px);
 }
 
 @media (max-width: 1100px) {
