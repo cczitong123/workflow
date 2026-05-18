@@ -52,6 +52,15 @@ USER_PATHS = {
     "storage_db_path": "./data/agentic_workflow.sqlite3",
 }
 
+DEFAULT_JIRA = {
+    "base_url": "",
+    "personal_token": "",
+    "epic_link_field": "customfield_10109",
+    "parent_link_field": "customfield_10101",
+    "project_list_limit": 500,
+    "epic_list_limit": 200,
+}
+
 DEFAULT_CODE_RAG = {
     "mode": "local",
     "embedding_model_path": "./local_jina-code-embeddings-1.5b",
@@ -143,6 +152,16 @@ class LlmApiConfig:
 
 
 @dataclass(frozen=True)
+class JiraConfig:
+    base_url: str
+    personal_token: str
+    epic_link_field: str
+    parent_link_field: str
+    project_list_limit: int
+    epic_list_limit: int
+
+
+@dataclass(frozen=True)
 class AppConfig:
     host: str
     port: int
@@ -151,6 +170,7 @@ class AppConfig:
     epic_data: EpicDataConfig
     code_rag: CodeRagConfig
     llm_api: LlmApiConfig
+    jira: JiraConfig
 
 
 def _resolve_path(value: str | Path) -> Path:
@@ -272,6 +292,18 @@ def load_app_config() -> AppConfig:
             ),
             frequency_penalty=float(
                 _env("LLM_FREQUENCY_PENALTY", str(DEFAULT_LLM["frequency_penalty"]))
+            ),
+        ),
+        jira=JiraConfig(
+            base_url=_env("JIRA_BASE_URL", DEFAULT_JIRA["base_url"]).rstrip("/"),
+            personal_token=_env("JIRA_PERSONAL_TOKEN", DEFAULT_JIRA["personal_token"]),
+            epic_link_field=_env("JIRA_EPIC_LINK_FIELD", DEFAULT_JIRA["epic_link_field"]),
+            parent_link_field=_env("JIRA_PARENT_LINK_FIELD", DEFAULT_JIRA["parent_link_field"]),
+            project_list_limit=int(
+                _env("JIRA_PROJECT_LIST_LIMIT", str(DEFAULT_JIRA["project_list_limit"]))
+            ),
+            epic_list_limit=int(
+                _env("JIRA_EPIC_LIST_LIMIT", str(DEFAULT_JIRA["epic_list_limit"]))
             ),
         ),
     )

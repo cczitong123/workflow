@@ -14,6 +14,7 @@
       </div>
       <div class="controls">
         <select id="epicSelect"></select>
+        <button id="jiraImportButton" class="button-secondary">Import from Jira</button>
         <button id="loadButton" class="button-primary">Generate Draft</button>
       </div>
     </header>
@@ -112,6 +113,104 @@
         </div>
       </section>
     </main>
+
+    <div id="jiraModal" class="modal-backdrop hidden" aria-hidden="true">
+      <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="jiraModalTitle">
+        <div class="modal-header">
+          <div>
+            <h2 id="jiraModalTitle">Import Epic from Jira</h2>
+            <p class="modal-subtitle">
+              Connect to Jira, find an Epic, and load it into the workbench.
+            </p>
+          </div>
+          <button id="jiraModalClose" class="icon-button" aria-label="Close Jira import dialog">×</button>
+        </div>
+
+        <div class="modal-status" id="jiraModalStatus"></div>
+
+        <div class="modal-body">
+          <section class="modal-section">
+            <h3>1. Connect</h3>
+            <label class="field-label" for="jiraTokenInput">Personal Token</label>
+            <input id="jiraTokenInput" class="text-input" type="password" autocomplete="off" />
+            <label class="checkbox-row">
+              <input id="jiraRememberCheckbox" type="checkbox" />
+              <span>Remember locally on this machine</span>
+            </label>
+            <div class="modal-actions">
+              <button id="jiraConnectButton" class="button-primary">Connect to Jira</button>
+            </div>
+            <p id="jiraCredentialState" class="modal-helper">Jira token required.</p>
+          </section>
+
+          <section class="modal-section" id="jiraFindEpicSection">
+            <h3>2. Find Epic</h3>
+
+            <div class="modal-subsection modal-subsection-primary">
+              <div class="subsection-heading">
+                <div>
+                  <h4>Direct Issue Key</h4>
+                  <p class="subsection-copy">Fastest path when the Jira issue key is already known.</p>
+                </div>
+                <span class="subsection-badge">Recommended</span>
+              </div>
+              <label class="field-label compact" for="jiraIssueKeyInput">Full Issue Key</label>
+              <div class="inline-input-row">
+                <input
+                  id="jiraIssueKeyInput"
+                  class="text-input"
+                  type="text"
+                  placeholder="Example: PARK-12345"
+                  autocomplete="off"
+                />
+                <button id="jiraLoadByKeyButton" class="button-secondary">Load by Key</button>
+              </div>
+            </div>
+
+            <div class="modal-subsection modal-subsection-secondary">
+              <div class="subsection-heading">
+                <div>
+                  <h4>Browse by Project</h4>
+                  <p class="subsection-copy">Choose a project first, then load and search its Epic list.</p>
+                </div>
+              </div>
+              <label class="field-label compact" for="jiraProjectSearch">Project</label>
+              <input
+                id="jiraProjectSearch"
+                class="text-input"
+                type="text"
+                placeholder="Search or select a project"
+                autocomplete="off"
+              />
+              <ul id="jiraProjectList" class="selection-list"></ul>
+
+              <label class="field-label compact" for="jiraEpicSearch">Epic in Selected Project</label>
+              <input
+                id="jiraEpicSearch"
+                class="text-input"
+                type="text"
+                placeholder="Search Epic in selected project"
+                autocomplete="off"
+              />
+              <ul id="jiraEpicList" class="selection-list"></ul>
+            </div>
+          </section>
+
+          <section class="modal-section" id="jiraSelectedEpicSection">
+            <h3>3. Selected Epic</h3>
+            <div class="selection-preview">
+              <p><strong>Key:</strong> <span id="jiraSelectedEpicKey">No Epic selected.</span></p>
+              <p><strong>Title:</strong> <span id="jiraSelectedEpicTitle">-</span></p>
+              <label class="field-label">Description Preview</label>
+              <pre id="jiraSelectedEpicPreview" class="selection-preview-body"></pre>
+            </div>
+            <div class="modal-actions">
+              <button id="jiraUseEpicButton" class="button-primary">Use This Epic</button>
+            </div>
+          </section>
+        </div>
+      </section>
+    </div>
 
     <script src="/app.js"></script>
   </body>

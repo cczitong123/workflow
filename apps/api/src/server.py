@@ -6,10 +6,11 @@ import os
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import config as app_config_module
 from config import AppConfig, load_app_config
+from modules.epics.jira_provider import JiraEpicProvider
 from modules.epics.repository import EpicRepository
 from modules.integrations.code_rag_adapter import retrieve_code_evidence
 from modules.integrations.llm_adapter import (
@@ -32,6 +33,7 @@ ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_WEB_DIR = ROOT / "apps" / "web"
 
 EPICS: EpicRepository | None = None
+JIRA: JiraEpicProvider | None = None
 SESSIONS: SessionStore | None = None
 WEB_DIR = DEFAULT_WEB_DIR
 APP_CONFIG: AppConfig | None = None
@@ -65,6 +67,8 @@ def log_config_summary(config: AppConfig) -> None:
     log_event("BOOT", f"code_rag.device={config.code_rag.device or 'missing'}")
     log_event("BOOT", f"code_rag.embedding_model_path={config.code_rag.embedding_model_path or 'missing'}")
     log_event("BOOT", f"code_rag.vector_store_path={config.code_rag.vector_store_path or 'missing'}")
+    log_event("BOOT", f"jira.base_url={config.jira.base_url or 'missing'}")
+    log_event("BOOT", f"jira.saved_token={_mask_presence(config.jira.personal_token)}")
 
 
 def _draft_from_payload(payload: dict, fallback_version: int) -> WhatToDoDraft:
@@ -129,12 +133,41 @@ def _sync_manual_draft_if_needed(session, payload: dict) -> None:
     log_event("DRAFT", f"Session {session.id} saved manual editor changes as version_id={draft_version_id}")
 
 
+def _serialize_epic_record(record) -> dict:
+    return {
+        "id": record.source.id,
+        "title": record.source.title,
+        "description": record.source.description,
+        "whatToDo": record.source.what_to_do,
+        "parsedWhatToDo": to_dict(record.parsed_what_to_do),
+        "metadata": record.source.metadata,
+    }
+
+
 class AppHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if EPICS is None or SESSIONS is None:
             self._json({"error": "Epic repository is not configured."}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
             return
         parsed = urlparse(self.path)
+        if JIRA is not None and parsed.path == "/api/jira/credential-status":
+            self._json({"hasSavedToken": JIRA.has_saved_token()})
+            return
+
+        if JIRA is not None and parsed.path == "/api/jira/projects":
+            self._json({"projects": JIRA.list_projects()})
+            return
+
+        if JIRA is not None and parsed.path.startswith("/api/jira/projects/") and parsed.path.endswith("/epics"):
+            project_key = unquote(parsed.path.split("/")[-2])
+            self._json({"epics": JIRA.list_epics(project_key)})
+            return
+
+        if JIRA is not None and parsed.path.startswith("/api/jira/epics/"):
+            issue_key = unquote(parsed.path.split("/")[-1])
+            self._json(_serialize_epic_record(JIRA.get_epic(issue_key)))
+            return
+
         if parsed.path == "/api/epics":
             self._json(
                 [
@@ -182,13 +215,7 @@ class AppHandler(BaseHTTPRequestHandler):
             epic_id = parsed.path.split("/")[-1]
             record = EPICS.get_epic(epic_id)
             self._json(
-                {
-                    "id": record.source.id,
-                    "title": record.source.title,
-                    "description": record.source.description,
-                    "whatToDo": record.source.what_to_do,
-                    "parsedWhatToDo": to_dict(record.parsed_what_to_do),
-                }
+                _serialize_epic_record(record)
             )
             return
 
@@ -215,14 +242,49 @@ class AppHandler(BaseHTTPRequestHandler):
         log_event("HTTP", f"POST {parsed.path} received")
 
         try:
+            if parsed.path == "/api/jira/connect":
+                if JIRA is None:
+                    self._json({"error": "Jira provider is not configured."}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                    return
+                token = str(payload.get("token", "")).strip()
+                remember_locally = bool(payload.get("rememberLocally", False))
+                if not token:
+                    self._json({"error": "A Jira personal token is required."}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                profile = JIRA.connect(token, remember_locally)
+                self._json(
+                    {
+                        "connected": True,
+                        "profile": {
+                            "displayName": profile.get("displayName", ""),
+                            "name": profile.get("name", ""),
+                            "emailAddress": profile.get("emailAddress", ""),
+                        },
+                    }
+                )
+                return
+
             if parsed.path == "/api/sessions":
-                epic_id = payload["epicId"]
-                log_event("SESSION", f"Creating session for epic={epic_id}")
-                record = EPICS.get_epic(epic_id)
+                source_type = str(payload.get("sourceType", "local"))
+                if source_type == "jira":
+                    epic_payload = payload.get("epic")
+                    if not isinstance(epic_payload, dict):
+                        self._json({"error": "A Jira Epic payload is required."}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    epic_id = epic_payload.get("id", "jira-epic")
+                    log_event("SESSION", f"Creating Jira session for epic={epic_id}")
+                    from modules.epics.repository import normalize_epic_payload
+
+                    record = normalize_epic_payload(epic_payload)
+                else:
+                    epic_id = payload["epicId"]
+                    log_event("SESSION", f"Creating session for epic={epic_id}")
+                    record = EPICS.get_epic(epic_id)
                 session = SESSIONS.create(
                     epic_id=record.source.id,
                     title=record.source.title,
                     description=record.source.description,
+                    source_type=source_type,
                 )
                 log_event("SESSION", f"Session created id={session.id}")
                 self._json({"sessionId": session.id})
@@ -325,7 +387,9 @@ class AppHandler(BaseHTTPRequestHandler):
                     message="Draft generated.",
                 )
 
-                ground_truth = EPICS.get_epic(session.epic_id).parsed_what_to_do
+                ground_truth = None
+                if session.source_type == "local":
+                    ground_truth = EPICS.get_epic(session.epic_id).parsed_what_to_do
                 log_event("GENERATE", f"Session {session_id} completed successfully")
                 self._json(
                     {
@@ -621,6 +685,7 @@ def configure_runtime(data_dir: Path) -> None:
     global EPICS
     global WEB_DIR
     global APP_CONFIG
+    global JIRA
     global SESSIONS
 
     if not data_dir.exists():
@@ -635,6 +700,7 @@ def configure_runtime(data_dir: Path) -> None:
     APP_CONFIG = load_app_config()
     log_config_summary(APP_CONFIG)
     EPICS = EpicRepository(data_dir)
+    JIRA = JiraEpicProvider(APP_CONFIG.jira)
     SESSIONS = SessionStore(APP_CONFIG.storage_db_path)
     WEB_DIR = DEFAULT_WEB_DIR
 

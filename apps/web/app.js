@@ -3,7 +3,19 @@ let currentDraft = null;
 let currentDraftVersionId = null;
 let currentVersions = [];
 let activePollId = null;
+let currentImportedEpic = null;
 const PANEL_STORAGE_KEY = "agentic-workflow-workspace-widths";
+
+const jiraState = {
+  hasSavedToken: false,
+  connected: false,
+  projects: [],
+  filteredProjects: [],
+  epics: [],
+  filteredEpics: [],
+  selectedProjectKey: "",
+  selectedEpic: null,
+};
 
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, {
@@ -75,10 +87,16 @@ function setupResizablePanels() {
 
         if (activeHandle.dataset.resizeHandle === "left") {
           document.documentElement.style.setProperty("--left-panel-width", `${leftPercent}%`);
-          savePanelWidths(leftPercent, parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--right-panel-width")));
+          savePanelWidths(
+            leftPercent,
+            parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--right-panel-width")),
+          );
         } else {
           document.documentElement.style.setProperty("--right-panel-width", `${rightPercent}%`);
-          savePanelWidths(parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--left-panel-width")), rightPercent);
+          savePanelWidths(
+            parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--left-panel-width")),
+            rightPercent,
+          );
         }
       };
 
@@ -138,7 +156,7 @@ async function pollSessionStatus(sessionId) {
       });
       return;
     }
-    if (status.status !== "generated" && status.status !== "confirmed" && status.status !== "idle") {
+    if (!["generated", "confirmed", "idle"].includes(status.status)) {
       setStatus({
         title: "In Progress",
         message: status.currentMessage || status.currentPhase || "Working...",
@@ -254,7 +272,7 @@ function renderQuestions(items) {
 function renderDraft(draft) {
   currentDraft = draft;
   document.getElementById("draftEditor").value = draft?.raw_text || "";
-  document.getElementById("draftWaiting").style.display = draft ? "none" : "none";
+  document.getElementById("draftWaiting").style.display = draft ? "none" : "block";
   renderQuestions(draft?.open_questions || []);
 }
 
@@ -350,6 +368,8 @@ function setListEmptyState(elementId, message) {
 }
 
 function resetWorkspace({ showWaiting = false } = {}) {
+  stopStatusPolling();
+  currentSessionId = null;
   renderIntent(null);
   renderEvidence([]);
   currentDraft = null;
@@ -403,6 +423,7 @@ function renderHistoricalReference(text) {
 async function loadEpics() {
   const epics = await fetchJson("/api/epics");
   const select = document.getElementById("epicSelect");
+  select.innerHTML = "";
   epics.forEach((epic) => {
     const option = document.createElement("option");
     option.value = epic.id;
@@ -411,22 +432,30 @@ async function loadEpics() {
   });
 }
 
+function getCurrentEpicInput() {
+  if (currentImportedEpic) {
+    return { sourceType: "jira", epic: currentImportedEpic };
+  }
+  return { sourceType: "local", epicId: document.getElementById("epicSelect").value };
+}
+
 async function generate() {
-  const epicId = document.getElementById("epicSelect").value;
+  const epicInput = getCurrentEpicInput();
   setStatus({ title: "In Progress", message: "Preparing session...", variant: "busy", busy: true });
   applyBusyState({ generate: true, refine: true, rerun: true, confirm: true });
 
   try {
-    const epic = await fetchJson(`/api/epics/${epicId}`);
+    const epic = epicInput.sourceType === "jira"
+      ? epicInput.epic
+      : await fetchJson(`/api/epics/${epicInput.epicId}`);
+
     resetWorkspace({ showWaiting: true });
     renderDescription(epic.description || "");
-    renderHistoricalReference(epic.parsedWhatToDo
-      ? JSON.stringify(epic.parsedWhatToDo, null, 2)
-      : "");
+    renderHistoricalReference(epic.parsedWhatToDo ? JSON.stringify(epic.parsedWhatToDo, null, 2) : "");
 
     const session = await fetchJson("/api/sessions", {
       method: "POST",
-      body: JSON.stringify({ epicId }),
+      body: JSON.stringify(epicInput),
     });
     currentSessionId = session.sessionId;
     startStatusPolling(currentSessionId);
@@ -574,6 +603,256 @@ async function confirmDraft() {
   }
 }
 
+function setJiraModalStatus(message, variant = "idle") {
+  const node = document.getElementById("jiraModalStatus");
+  node.textContent = message || "";
+  node.dataset.variant = variant;
+}
+
+function setJiraCredentialState(message) {
+  document.getElementById("jiraCredentialState").textContent = message;
+}
+
+function setJiraFindEpicEnabled(enabled) {
+  document.getElementById("jiraFindEpicSection").classList.toggle("is-disabled", !enabled);
+  document.getElementById("jiraIssueKeyInput").disabled = !enabled;
+  document.getElementById("jiraLoadByKeyButton").disabled = !enabled;
+  document.getElementById("jiraProjectSearch").disabled = !enabled;
+  document.getElementById("jiraEpicSearch").disabled = !enabled || !jiraState.selectedProjectKey;
+}
+
+function openJiraModal() {
+  document.getElementById("jiraModal").classList.remove("hidden");
+  document.getElementById("jiraModal").setAttribute("aria-hidden", "false");
+  resetJiraModalSelection();
+  setJiraFindEpicEnabled(false);
+  loadJiraCredentialStatus().catch((error) => {
+    setJiraModalStatus(error.message, "error");
+  });
+}
+
+function closeJiraModal() {
+  document.getElementById("jiraModal").classList.add("hidden");
+  document.getElementById("jiraModal").setAttribute("aria-hidden", "true");
+}
+
+function resetJiraModalSelection() {
+  jiraState.projects = [];
+  jiraState.filteredProjects = [];
+  jiraState.epics = [];
+  jiraState.filteredEpics = [];
+  jiraState.selectedProjectKey = "";
+  jiraState.selectedEpic = null;
+  document.getElementById("jiraProjectSearch").value = "";
+  document.getElementById("jiraEpicSearch").value = "";
+  document.getElementById("jiraIssueKeyInput").value = "";
+  renderProjectList();
+  renderEpicList();
+  renderSelectedJiraEpic();
+}
+
+async function loadJiraCredentialStatus() {
+  setJiraModalStatus("Checking Jira credential status...", "busy");
+  const result = await fetchJson("/api/jira/credential-status");
+  jiraState.hasSavedToken = Boolean(result.hasSavedToken);
+  jiraState.connected = jiraState.hasSavedToken;
+  if (jiraState.connected) {
+    setJiraCredentialState("Connected using saved local credential.");
+    setJiraModalStatus("Connected to Jira.", "idle");
+    setJiraFindEpicEnabled(true);
+    await loadJiraProjects();
+  } else {
+    setJiraCredentialState("Jira token required.");
+    setJiraModalStatus("Enter a Jira token to continue.", "idle");
+    setJiraFindEpicEnabled(false);
+  }
+}
+
+async function connectJira() {
+  const token = document.getElementById("jiraTokenInput").value.trim();
+  const rememberLocally = document.getElementById("jiraRememberCheckbox").checked;
+  if (!token) {
+    setJiraModalStatus("A Jira personal token is required.", "error");
+    return;
+  }
+
+  setJiraModalStatus("Validating Jira access...", "busy");
+  document.getElementById("jiraConnectButton").disabled = true;
+  try {
+    await fetchJson("/api/jira/connect", {
+      method: "POST",
+      body: JSON.stringify({ token, rememberLocally }),
+    });
+    jiraState.connected = true;
+    jiraState.hasSavedToken = jiraState.hasSavedToken || rememberLocally;
+    setJiraCredentialState(
+      rememberLocally
+        ? "Connected and saved locally for future use."
+        : "Connected using the current session credential.",
+    );
+    setJiraModalStatus("Connected to Jira.", "idle");
+    setJiraFindEpicEnabled(true);
+    await loadJiraProjects();
+  } catch (error) {
+    setJiraModalStatus(error.message, "error");
+    jiraState.connected = false;
+    setJiraFindEpicEnabled(false);
+  } finally {
+    document.getElementById("jiraConnectButton").disabled = false;
+  }
+}
+
+async function loadJiraProjects() {
+  if (!jiraState.connected) {
+    return;
+  }
+  setJiraModalStatus("Loading projects...", "busy");
+  const result = await fetchJson("/api/jira/projects");
+  jiraState.projects = result.projects || [];
+  jiraState.filteredProjects = jiraState.projects.slice();
+  renderProjectList();
+  setJiraModalStatus("Projects loaded.", "idle");
+}
+
+function renderProjectList() {
+  const list = document.getElementById("jiraProjectList");
+  list.innerHTML = "";
+  jiraState.filteredProjects.forEach((project) => {
+    const item = document.createElement("li");
+    item.className = project.key === jiraState.selectedProjectKey ? "is-selected" : "";
+    item.innerHTML = `
+      <span class="selection-item-title">${project.key}</span>
+      <span class="selection-item-meta">${project.name}</span>
+    `;
+    item.addEventListener("click", () => selectJiraProject(project));
+    list.appendChild(item);
+  });
+}
+
+function filterJiraProjects() {
+  const query = document.getElementById("jiraProjectSearch").value.trim().toLowerCase();
+  jiraState.filteredProjects = jiraState.projects.filter((project) => {
+    if (!query) {
+      return true;
+    }
+    return (
+      project.key.toLowerCase().includes(query) ||
+      project.name.toLowerCase().includes(query)
+    );
+  });
+  renderProjectList();
+}
+
+async function selectJiraProject(project) {
+  jiraState.selectedProjectKey = project.key;
+  jiraState.epics = [];
+  jiraState.filteredEpics = [];
+  jiraState.selectedEpic = null;
+  renderProjectList();
+  renderEpicList();
+  renderSelectedJiraEpic();
+  document.getElementById("jiraEpicSearch").disabled = false;
+
+  setJiraModalStatus(`Loading Epics for ${project.key}...`, "busy");
+  const result = await fetchJson(`/api/jira/projects/${encodeURIComponent(project.key)}/epics`);
+  jiraState.epics = result.epics || [];
+  jiraState.filteredEpics = jiraState.epics.slice();
+  renderEpicList();
+  setJiraModalStatus(`Loaded ${jiraState.epics.length} Epics for ${project.key}.`, "idle");
+}
+
+function renderEpicList() {
+  const list = document.getElementById("jiraEpicList");
+  list.innerHTML = "";
+  jiraState.filteredEpics.forEach((epic) => {
+    const item = document.createElement("li");
+    item.className = jiraState.selectedEpic?.id === epic.key ? "is-selected" : "";
+    item.innerHTML = `
+      <span class="selection-item-title">${epic.key}</span>
+      <span class="selection-item-meta">${epic.summary}${epic.status ? ` • ${epic.status}` : ""}</span>
+    `;
+    item.addEventListener("click", () => loadJiraEpic(epic.key));
+    list.appendChild(item);
+  });
+}
+
+function filterJiraEpics() {
+  const query = document.getElementById("jiraEpicSearch").value.trim().toLowerCase();
+  jiraState.filteredEpics = jiraState.epics.filter((epic) => {
+    if (!query) {
+      return true;
+    }
+    return (
+      epic.key.toLowerCase().includes(query) ||
+      (epic.summary || "").toLowerCase().includes(query)
+    );
+  });
+  renderEpicList();
+}
+
+async function loadJiraEpic(issueKey) {
+  setJiraModalStatus(`Loading Epic ${issueKey}...`, "busy");
+  const epic = await fetchJson(`/api/jira/epics/${encodeURIComponent(issueKey)}`);
+  jiraState.selectedEpic = epic;
+  renderEpicList();
+  renderSelectedJiraEpic();
+  setJiraModalStatus(`Epic ${issueKey} loaded.`, "idle");
+}
+
+function renderSelectedJiraEpic() {
+  const keyNode = document.getElementById("jiraSelectedEpicKey");
+  const titleNode = document.getElementById("jiraSelectedEpicTitle");
+  const previewNode = document.getElementById("jiraSelectedEpicPreview");
+  const useButton = document.getElementById("jiraUseEpicButton");
+
+  if (!jiraState.selectedEpic) {
+    keyNode.textContent = "No Epic selected.";
+    titleNode.textContent = "-";
+    previewNode.textContent = "";
+    useButton.disabled = true;
+    return;
+  }
+
+  keyNode.textContent = jiraState.selectedEpic.id || "";
+  titleNode.textContent = jiraState.selectedEpic.title || "";
+  previewNode.textContent = (jiraState.selectedEpic.description || "").slice(0, 1200);
+  useButton.disabled = false;
+}
+
+async function loadJiraEpicByKey() {
+  const issueKey = document.getElementById("jiraIssueKeyInput").value.trim().toUpperCase();
+  if (!issueKey) {
+    setJiraModalStatus("A full issue key is required.", "error");
+    return;
+  }
+  try {
+    await loadJiraEpic(issueKey);
+  } catch (error) {
+    setJiraModalStatus(error.message, "error");
+  }
+}
+
+function useImportedJiraEpic() {
+  if (!jiraState.selectedEpic) {
+    return;
+  }
+  currentImportedEpic = jiraState.selectedEpic;
+  resetWorkspace({ showWaiting: false });
+  renderDescription(currentImportedEpic.description || "");
+  renderHistoricalReference(
+    currentImportedEpic.parsedWhatToDo
+      ? JSON.stringify(currentImportedEpic.parsedWhatToDo, null, 2)
+      : "",
+  );
+  closeJiraModal();
+  setStatus({
+    title: "Ready",
+    message: `Epic ${currentImportedEpic.id} imported from Jira. Ready to generate.`,
+    variant: "idle",
+    busy: false,
+  });
+}
+
 document.getElementById("loadButton").addEventListener("click", generate);
 document.getElementById("refineButton").addEventListener("click", refine);
 document.getElementById("rerunButton").addEventListener("click", rerunRetrieval);
@@ -582,10 +861,26 @@ document.getElementById("draftEditor").addEventListener("input", () => {
   syncDraftFromEditor();
   renderVersionMeta();
 });
+document.getElementById("jiraImportButton").addEventListener("click", openJiraModal);
+document.getElementById("jiraModalClose").addEventListener("click", closeJiraModal);
+document.getElementById("jiraConnectButton").addEventListener("click", connectJira);
+document.getElementById("jiraProjectSearch").addEventListener("input", filterJiraProjects);
+document.getElementById("jiraEpicSearch").addEventListener("input", filterJiraEpics);
+document.getElementById("jiraLoadByKeyButton").addEventListener("click", loadJiraEpicByKey);
+document.getElementById("jiraUseEpicButton").addEventListener("click", useImportedJiraEpic);
+document.getElementById("epicSelect").addEventListener("change", () => {
+  currentImportedEpic = null;
+});
+document.getElementById("jiraModal").addEventListener("click", (event) => {
+  if (event.target.id === "jiraModal") {
+    closeJiraModal();
+  }
+});
 
 loadSavedPanelWidths();
 setupResizablePanels();
 resetWorkspace({ showWaiting: false });
+renderSelectedJiraEpic();
 loadEpics().catch((error) => {
   setStatus({ title: "Error", message: error.message, variant: "error", busy: false });
   document.getElementById("description").textContent = error.message;
