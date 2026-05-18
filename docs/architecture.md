@@ -1,6 +1,6 @@
 # Agentic-Workflow Architecture
 
-Agentic-Workflow is a local-first Epic analysis workflow for turning Epic descriptions into structured `What to Do` drafts, with explicit retrieval, refinement, version history, and local persistence.
+Agentic-Workflow is an Epic analysis workflow for turning Epic descriptions into structured `What to Do` drafts, with explicit retrieval, refinement, version history, and local persistence.
 
 This document describes the current implementation shape, the main execution flow, and the boundaries between the major parts of the system.
 
@@ -8,7 +8,7 @@ This document describes the current implementation shape, the main execution flo
 
 The application currently combines:
 
-- local Epic input files
+- Jira-imported Epic input in the browser workbench
 - prompt-driven LLM stages
 - local code retrieval from embeddings and FAISS
 - browser-based refinement and review
@@ -17,6 +17,7 @@ The application currently combines:
 The system is designed so that:
 
 - Epic input sources can later expand beyond local JSON
+- the UI-facing Epic source can evolve without changing the workflow orchestration model
 - local persistence can later be replaced by a cloud database
 - prompt behavior can evolve without changing orchestration structure
 - session history and decision trace can be recovered from structured stored data
@@ -51,18 +52,18 @@ The system is designed so that:
 ### Frontend
 
 - `/apps/web/index.html`
-  Static workbench structure.
+  Static workbench structure, including the Jira import modal and the three-panel workbench.
 
 - `/apps/web/styles.css`
-  Workbench layout, panel hierarchy, and UI states.
+  Workbench layout, panel hierarchy, UI states, modal sizing, and sticky modal header behavior.
 
 - `/apps/web/app.js`
-  Browser interaction flow, polling, rendering, version actions, and editor synchronization.
+  Browser interaction flow, Jira import, polling, rendering, version actions, and editor synchronization.
 
 ### Local data and persistence
 
 - `/data/epics/`
-  Local Epic JSON source files.
+  Local Epic JSON source files kept for backend compatibility and development-side normalization support.
 
 - `/data/agentic_workflow.sqlite3`
   Local SQLite persistence database.
@@ -117,7 +118,7 @@ Current behavior:
 - `description` remains raw text
 - historical `what_to_do` text is preserved and parsed into structured steps and file changes
 
-This layer is the natural place for a future Jira-backed Epic provider.
+This layer now also supports imported Epic-shaped payload normalization and remains the natural place for Epic-source expansion.
 
 ### 3. Integration layer
 
@@ -194,7 +195,7 @@ The persistence layer currently stores enough information to support:
 
 The current initial path is:
 
-1. A local Epic is selected in the browser UI.
+1. An Epic is imported from Jira in the browser UI.
 2. A session is created and persisted.
 3. The Epic description is shown immediately in the UI.
 4. Retrieval intent is generated from the Epic description.
@@ -334,6 +335,18 @@ Partial results are exposed progressively so the UI can show:
 
 instead of waiting for the full workflow to finish before rendering anything.
 
+### Current Epic source behavior
+
+The current browser workbench exposes Jira import as the active Epic-loading path.
+
+The local Epic repository still exists in the backend for:
+
+- development support
+- repository-level normalization
+- compatibility with imported Epic-shaped payloads
+
+but it is no longer the main interactive import path in the UI.
+
 ## Persistence and traceability
 
 The current SQLite-backed structure is intentionally designed to support later trace-pack generation.
@@ -409,11 +422,11 @@ The environment-variable prefix is:
 
 ## Migration direction
 
-The current codebase is local-first, but several boundaries are already aligned with future expansion.
+The current codebase keeps local persistence and local retrieval, but several boundaries are already aligned with future expansion.
 
 ### Future Epic providers
 
-The current local Epic repository can later be complemented by a Jira-backed provider without changing the workflow orchestration model.
+The current Jira-backed browser path and the local repository normalization layer are intentionally separated so that additional Epic providers can later be added without changing the workflow orchestration model.
 
 ### Future persistence backends
 
@@ -428,6 +441,7 @@ The current event and version structure is already suitable for later trace-pack
 The current architecture is centered on:
 
 - explicit workflow actions
+- Jira-based Epic import in the current UI
 - prompt-driven generation stages
 - local retrieval evidence
 - structured draft version history

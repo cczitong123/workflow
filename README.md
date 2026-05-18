@@ -1,12 +1,12 @@
 # Agentic-Workflow
 
-Agentic-Workflow is a local-first Epic analysis workbench for turning an Epic description into a structured `What to Do` draft, with code retrieval, refinement, version history, and local traceable persistence.
+Agentic-Workflow is an Epic analysis workbench for turning an Epic description into a structured `What to Do` draft, with code retrieval, refinement, version history, and local traceable persistence.
 
 ## What the application currently does
 
-The current flow is:
+The current UI-driven flow is:
 
-1. An Epic record is loaded from local JSON under `data/epics/`.
+1. An Epic is imported from Jira through the `Import from Jira` modal.
 2. The Epic description is summarized into retrieval intent.
 3. A retrieval query is generated from the description and summarized intent.
 4. Code evidence is retrieved from a local embedding model and local vector store.
@@ -15,6 +15,8 @@ The current flow is:
 7. Retrieval can be explicitly re-run with the latest answers and notes.
 8. Draft versions can be restored from version history.
 9. Workflow state is persisted locally in SQLite.
+
+The backend still contains a local Epic repository under `data/epics/` for development support and normalization compatibility, but the current browser workbench is centered on Jira import rather than local file browsing.
 
 ## Repository map
 
@@ -51,7 +53,10 @@ The current flow is:
 ### Epic ingestion
 
 - `/apps/api/src/modules/epics/repository.py`
-  Local Epic JSON files are loaded and normalized here.
+  Local Epic JSON files are loaded and normalized here. The same normalization path is also reused for imported Epic-shaped payloads.
+
+- `/apps/api/src/modules/epics/jira_provider.py`
+  Jira-backed Epic loading is handled here. Credential validation, project listing, Epic listing, issue-key loading, optional token persistence, and project-key filtering are defined here.
 
 - `/apps/api/src/modules/epics/what_to_do_parser.py`
   Historical `whatToDo` text is parsed into structured steps and file-change entries here.
@@ -109,18 +114,18 @@ Prompt assets live in:
 ## Frontend architecture
 
 - `/apps/web/index.html`
-  Static workbench structure. The three-column layout, headings, buttons, info popovers, and panel placeholders are defined here.
+  Static workbench structure. The three-column layout, headings, Jira import modal, buttons, info popovers, and panel placeholders are defined here.
 
 - `/apps/web/styles.css`
-  Workbench layout, visual hierarchy, resizable columns, panel states, display surfaces, editor styling, and button hierarchy are defined here.
+  Workbench layout, visual hierarchy, resizable columns, display surfaces, modal sizing, sticky modal headers, editor styling, and button hierarchy are defined here.
 
 - `/apps/web/app.js`
-  Browser-side workflow logic is implemented here. Epic loading, generate/refine/rerun/confirm actions, status polling, version rendering, restore actions, draft syncing, and UI state transitions are handled here.
+  Browser-side workflow logic is implemented here. Jira import, generate/refine/rerun/confirm actions, status polling, version rendering, restore actions, draft syncing, and UI state transitions are handled here.
 
 ## Local data and persistence
 
 - `/data/epics/`
-  Local Epic JSON input files.
+  Local Epic JSON input files kept for development support, repository normalization, and compatibility testing.
 
 - `/data/agentic_workflow.sqlite3`
   Local SQLite persistence store. Session state, retrieval snapshots, evidence items, draft versions, and user events are stored here.
@@ -192,7 +197,7 @@ There is currently no alternate JSON-file storage mode for the main application 
 
 The current default runtime shape is:
 
-- Epic source: local
+- Epic source in the UI: Jira import
 - Code RAG: local
 - LLM: remote
 
@@ -211,6 +216,9 @@ Typical values changed there:
 - `AGENTIC_WORKFLOW_EPIC_DATA_DIR`
 - `AGENTIC_WORKFLOW_PROMPT_DIR`
 - `AGENTIC_WORKFLOW_STORAGE_DB_PATH`
+- `AGENTIC_WORKFLOW_JIRA_BASE_URL`
+- `AGENTIC_WORKFLOW_JIRA_PERSONAL_TOKEN`
+- `AGENTIC_WORKFLOW_JIRA_VISIBLE_PROJECT_KEYS`
 - `AGENTIC_WORKFLOW_CODE_RAG_EMBEDDING_MODEL_PATH`
 - `AGENTIC_WORKFLOW_CODE_RAG_VECTOR_STORE_PATH`
 - `AGENTIC_WORKFLOW_LLM_ENDPOINT`
@@ -229,6 +237,7 @@ Edit:
 
 Typical edits:
 
+- Jira project-list and Epic-list limits
 - local retrieval filters
 - local model paths
 - `top_k`
@@ -253,6 +262,20 @@ Typical edits:
 - open-question style
 - refinement behavior
 - retrieval-query few-shot examples
+
+### Jira project filtering
+
+If Jira project discovery should be narrowed for performance or focus, edit:
+
+- `AGENTIC_WORKFLOW_JIRA_VISIBLE_PROJECT_KEYS`
+
+Example:
+
+```env
+AGENTIC_WORKFLOW_JIRA_VISIBLE_PROJECT_KEYS=PARK,AMA,GEMINI
+```
+
+When this value is empty, all accessible Jira projects are shown. When it is populated, only the listed project keys are shown in the Jira import modal.
 
 ### Integration logic
 
