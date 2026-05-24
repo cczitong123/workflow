@@ -1,9 +1,14 @@
 let currentSessionId = null;
 let currentDraft = null;
 let currentDraftVersionId = null;
+let currentActionGuide = null;
+let currentActionGuideVersionId = null;
 let currentVersions = [];
 let activePollId = null;
 let currentImportedEpic = null;
+let workspaceMode = "iis_mode";
+let actionGuideOutdated = false;
+let confirmedIisVersionId = null;
 const PANEL_STORAGE_KEY = "agentic-workflow-workspace-widths";
 
 const jiraState = {
@@ -128,7 +133,8 @@ function applyBusyState({ generate = false, refine = false, rerun = false, confi
   document.getElementById("loadButton").disabled = generate;
   document.getElementById("refineButton").disabled = refine;
   document.getElementById("rerunButton").disabled = rerun;
-  document.getElementById("confirmButton").disabled = confirm;
+  document.getElementById("confirmIisButton").disabled = confirm;
+  document.getElementById("reopenIisButton").disabled = confirm;
 }
 
 function updateCurrentEpicBadge() {
@@ -145,6 +151,54 @@ function updateCurrentEpicBadge() {
   document.getElementById("loadButton").disabled = false;
 }
 
+function updateWorkspaceModeUI() {
+  const confirmButton = document.getElementById("confirmIisButton");
+  const reopenButton = document.getElementById("reopenIisButton");
+  const refineHeading = document.getElementById("refineHeading");
+  const refineInput = document.getElementById("refineInput");
+  const refineButton = document.getElementById("refineButton");
+  const actionGuideMeta = document.getElementById("actionGuideMeta");
+  const actionGuideOutdatedNode = document.getElementById("actionGuideOutdated");
+  const emptyState = document.getElementById("actionGuideEmptyState");
+  const draftEditor = document.getElementById("draftEditor");
+  const rerunButton = document.getElementById("rerunButton");
+
+  refineButton.disabled =
+    !currentSessionId ||
+    (workspaceMode === "action_guide_mode" ? !currentActionGuide : !currentDraft);
+  confirmButton.disabled = !currentSessionId || !currentDraft || workspaceMode === "action_guide_mode";
+  reopenButton.disabled = !currentSessionId || workspaceMode !== "action_guide_mode";
+  rerunButton.disabled = !currentSessionId || workspaceMode === "action_guide_mode";
+
+  if (workspaceMode === "action_guide_mode") {
+    refineHeading.textContent = "Refine Implementation Action Guide";
+    refineInput.placeholder = "Add reviewer guidance or answer a question to refine the current action guide...";
+    refineButton.textContent = "Refine Action Guide";
+    confirmButton.classList.add("hidden");
+    reopenButton.classList.remove("hidden");
+    draftEditor.readOnly = true;
+  } else {
+    refineHeading.textContent = "Refine Implementation Intent Specification";
+    refineInput.placeholder = "Add reviewer guidance or answer a question to refine the current IIS...";
+    refineButton.textContent = "Refine IIS";
+    confirmButton.classList.remove("hidden");
+    reopenButton.classList.add("hidden");
+    confirmButton.textContent = actionGuideOutdated
+      ? "Confirm IIS and Regenerate Action Guide"
+      : "Confirm IIS and Generate Action Guide";
+    draftEditor.readOnly = false;
+  }
+
+  if (currentActionGuide && currentActionGuide.source_iis_version_id) {
+    actionGuideMeta.textContent = `Generated from IIS Version ${currentActionGuide.source_iis_version_id}`;
+  } else {
+    actionGuideMeta.textContent = "";
+  }
+
+  actionGuideOutdatedNode.classList.toggle("hidden", !actionGuideOutdated);
+  emptyState.classList.toggle("hidden", Boolean(currentActionGuide));
+}
+
 function setCurrentEpic(epic, sourceType, message) {
   currentImportedEpic = {
     ...epic,
@@ -152,11 +206,6 @@ function setCurrentEpic(epic, sourceType, message) {
   };
   resetWorkspace({ showWaiting: false });
   renderDescription(currentImportedEpic.description || "");
-  renderHistoricalReference(
-    currentImportedEpic.parsedWhatToDo
-      ? JSON.stringify(currentImportedEpic.parsedWhatToDo, null, 2)
-      : "",
-  );
   updateCurrentEpicBadge();
   setStatus({
     title: "Ready",
@@ -182,6 +231,14 @@ async function pollSessionStatus(sessionId) {
       renderDraft(status.draft);
       renderVersionMeta();
     }
+    if (status.actionGuide) {
+      renderActionGuide(status.actionGuide);
+    }
+    workspaceMode = status.mode || workspaceMode;
+    actionGuideOutdated = Boolean(status.actionGuideOutdated);
+    confirmedIisVersionId = status.confirmedIisVersionId ?? confirmedIisVersionId;
+    currentActionGuideVersionId = status.currentActionGuideVersionId ?? currentActionGuideVersionId;
+    updateWorkspaceModeUI();
     if (status.status === "error") {
       setStatus({
         title: "Error",
@@ -311,6 +368,39 @@ function renderDraft(draft) {
   renderQuestions(draft?.open_questions || []);
 }
 
+function renderActionGuide(actionGuide) {
+  currentActionGuide = actionGuide;
+  const surface = document.getElementById("actionGuideSurface");
+  const whatToDoList = document.getElementById("actionGuideWhatToDo");
+  const whereToChangeList = document.getElementById("actionGuideWhereToChange");
+  whatToDoList.innerHTML = "";
+  whereToChangeList.innerHTML = "";
+
+  if (!actionGuide) {
+    surface.classList.remove("is-filled");
+    surface.classList.add("is-empty");
+    updateWorkspaceModeUI();
+    return;
+  }
+
+  surface.classList.remove("is-empty");
+  surface.classList.add("is-filled");
+
+  (actionGuide.what_to_do || []).forEach((item) => {
+    const node = document.createElement("li");
+    node.textContent = item;
+    whatToDoList.appendChild(node);
+  });
+
+  (actionGuide.where_to_change || []).forEach((item) => {
+    const node = document.createElement("li");
+    node.textContent = item;
+    whereToChangeList.appendChild(node);
+  });
+
+  updateWorkspaceModeUI();
+}
+
 function syncDraftFromEditor() {
   if (!currentDraft) {
     return null;
@@ -329,7 +419,13 @@ function renderVersionMeta() {
     node.textContent = "";
     return;
   }
-  node.textContent = `Version ${currentDraft.version}`;
+  const stateLabel =
+    workspaceMode === "action_guide_mode"
+      ? `Confirmed Version ${currentDraft.version}`
+      : actionGuideOutdated
+        ? `Version ${currentDraft.version} • Editing again`
+        : `Version ${currentDraft.version} • Draft`;
+  node.textContent = stateLabel;
 }
 
 async function loadVersions() {
@@ -339,6 +435,7 @@ async function loadVersions() {
   const data = await fetchJson(`/api/sessions/${currentSessionId}/versions`);
   currentVersions = data.versions || [];
   currentDraftVersionId = data.currentDraftVersionId;
+  currentActionGuideVersionId = data.currentActionGuideVersionId;
   renderVersions();
 }
 
@@ -357,10 +454,18 @@ function renderVersions() {
 
     const info = document.createElement("div");
     const title = document.createElement("strong");
-    title.textContent = `Version ${version.version_number}`;
+    const artifactLabel = version.artifact_type === "action_guide" ? "Guide" : "IIS";
+    title.textContent = `${artifactLabel} v${version.version_number}`;
     const meta = document.createElement("span");
     meta.className = "version-meta";
-    meta.textContent = `${version.source_type} • ${version.created_at}${version.id === currentDraftVersionId ? " • current" : ""}`;
+    const isCurrent =
+      (version.artifact_type === "action_guide" && version.id === currentActionGuideVersionId) ||
+      (version.artifact_type !== "action_guide" && version.id === currentDraftVersionId);
+    const sourceSuffix =
+      version.artifact_type === "action_guide" && version.source_iis_version_id
+        ? ` • from IIS v${version.source_iis_version_id}`
+        : "";
+    meta.textContent = `${formatVersionSourceType(version.source_type)} • ${version.created_at}${sourceSuffix}${isCurrent ? " • current" : ""}`;
     info.appendChild(title);
     info.appendChild(meta);
 
@@ -368,7 +473,7 @@ function renderVersions() {
     actions.className = "version-actions";
     const restoreButton = document.createElement("button");
     restoreButton.textContent = "Restore";
-    restoreButton.disabled = version.id === currentDraftVersionId;
+    restoreButton.disabled = isCurrent;
     restoreButton.addEventListener("click", () => restoreVersion(version.id));
     actions.appendChild(restoreButton);
 
@@ -376,6 +481,18 @@ function renderVersions() {
     node.appendChild(actions);
     list.appendChild(node);
   });
+}
+
+function formatVersionSourceType(sourceType) {
+  const mapping = {
+    initial_generate: "initial generate",
+    refine: "refine",
+    rerun_retrieval: "rerun retrieval",
+    restore_version: "restore",
+    manual_edit: "manual edit",
+    generated_from_confirmed_iis: "generated",
+  };
+  return mapping[sourceType] || sourceType.replaceAll("_", " ");
 }
 
 function collectRefinePayload() {
@@ -405,14 +522,19 @@ function setListEmptyState(elementId, message) {
 function resetWorkspace({ showWaiting = false } = {}) {
   stopStatusPolling();
   currentSessionId = null;
+  currentActionGuide = null;
   renderIntent(null);
   renderEvidence([]);
   currentDraft = null;
   currentDraftVersionId = null;
+  currentActionGuideVersionId = null;
   currentVersions = [];
+  workspaceMode = "iis_mode";
+  actionGuideOutdated = false;
+  confirmedIisVersionId = null;
   document.getElementById("draftEditor").value = "";
   document.getElementById("draftWaiting").textContent = showWaiting
-    ? "Waiting for draft generation..."
+    ? "Waiting for Implementation Intent Specification generation..."
     : "";
   document.getElementById("draftWaiting").style.display = showWaiting ? "block" : "none";
   const description = document.getElementById("description");
@@ -422,10 +544,6 @@ function resetWorkspace({ showWaiting = false } = {}) {
   document.getElementById("intent").textContent = showWaiting
     ? "Waiting for retrieval intent..."
     : "";
-  const groundTruth = document.getElementById("groundTruth");
-  groundTruth.textContent = "";
-  groundTruth.classList.remove("is-filled");
-  groundTruth.classList.add("is-empty");
   setListEmptyState(
     "evidenceList",
     showWaiting ? "Waiting for code evidence..." : "",
@@ -438,7 +556,9 @@ function resetWorkspace({ showWaiting = false } = {}) {
     "versionList",
     showWaiting ? "No versions yet." : "",
   );
+  renderActionGuide(null);
   renderVersionMeta();
+  updateWorkspaceModeUI();
 }
 
 function renderDescription(text) {
@@ -446,13 +566,6 @@ function renderDescription(text) {
   description.textContent = text || "";
   description.classList.toggle("is-filled", Boolean(text));
   description.classList.toggle("is-empty", !text);
-}
-
-function renderHistoricalReference(text) {
-  const groundTruth = document.getElementById("groundTruth");
-  groundTruth.textContent = text || "";
-  groundTruth.classList.toggle("is-filled", Boolean(text));
-  groundTruth.classList.toggle("is-empty", !text);
 }
 
 function getCurrentEpicInput() {
@@ -481,7 +594,8 @@ async function generate() {
 
     resetWorkspace({ showWaiting: true });
     renderDescription(epic.description || "");
-    renderHistoricalReference(epic.parsedWhatToDo ? JSON.stringify(epic.parsedWhatToDo, null, 2) : "");
+    workspaceMode = "iis_mode";
+    updateWorkspaceModeUI();
 
     const session = await fetchJson("/api/sessions", {
       method: "POST",
@@ -498,14 +612,20 @@ async function generate() {
     renderIntent(generated.retrievalIntent);
     renderEvidence(generated.evidence);
     renderDraft(generated.draft);
+    renderActionGuide(generated.actionGuide || null);
+    workspaceMode = generated.mode || "iis_mode";
+    actionGuideOutdated = Boolean(generated.actionGuideOutdated);
+    confirmedIisVersionId = generated.confirmedIisVersionId ?? null;
     renderVersionMeta();
+    updateWorkspaceModeUI();
     await loadVersions();
-    setStatus({ title: "Ready", message: "Draft generated.", variant: "idle", busy: false });
+    setStatus({ title: "Ready", message: "Implementation Intent Specification generated.", variant: "idle", busy: false });
   } catch (error) {
     setStatus({ title: "Error", message: error.message, variant: "error", busy: false });
   } finally {
     stopStatusPolling();
     applyBusyState({ generate: false, refine: false, rerun: false, confirm: false });
+    updateWorkspaceModeUI();
   }
 }
 
@@ -513,9 +633,19 @@ async function refine() {
   if (!currentSessionId || !currentDraft) {
     return;
   }
-  syncDraftFromEditor();
+  if (workspaceMode === "iis_mode") {
+    syncDraftFromEditor();
+  }
   const { userMessage, answeredQuestions } = collectRefinePayload();
-  setStatus({ title: "In Progress", message: "Refining draft...", variant: "busy", busy: true });
+  setStatus({
+    title: "In Progress",
+    message:
+      workspaceMode === "action_guide_mode"
+        ? "Refining Implementation Action Guide..."
+        : "Refining Implementation Intent Specification...",
+    variant: "busy",
+    busy: true,
+  });
   applyBusyState({ generate: true, refine: true, rerun: true, confirm: true });
   startStatusPolling(currentSessionId);
 
@@ -528,16 +658,30 @@ async function refine() {
         currentDraft,
       }),
     });
-    renderDraft(refined.draft);
+    if (refined.draft) {
+      renderDraft(refined.draft);
+    }
+    if (refined.actionGuide) {
+      renderActionGuide(refined.actionGuide);
+    }
     renderVersionMeta();
     await loadVersions();
     document.getElementById("refineInput").value = "";
-    setStatus({ title: "Ready", message: "Draft refined.", variant: "idle", busy: false });
+    setStatus({
+      title: "Ready",
+      message:
+        workspaceMode === "action_guide_mode"
+          ? "Implementation Action Guide refined."
+          : "Implementation Intent Specification refined.",
+      variant: "idle",
+      busy: false,
+    });
   } catch (error) {
     setStatus({ title: "Error", message: error.message, variant: "error", busy: false });
   } finally {
     stopStatusPolling();
     applyBusyState({ generate: false, refine: false, rerun: false, confirm: false });
+    updateWorkspaceModeUI();
   }
 }
 
@@ -563,15 +707,24 @@ async function rerunRetrieval() {
     renderIntent(result.retrievalIntent);
     renderEvidence(result.evidence);
     renderDraft(result.draft);
+    workspaceMode = "iis_mode";
+    actionGuideOutdated = Boolean(result.actionGuideOutdated);
     renderVersionMeta();
+    updateWorkspaceModeUI();
     await loadVersions();
     document.getElementById("refineInput").value = "";
-    setStatus({ title: "Ready", message: "Retrieval rerun completed.", variant: "idle", busy: false });
+    setStatus({
+      title: "Ready",
+      message: "Retrieval rerun completed. Implementation Intent Specification updated.",
+      variant: "idle",
+      busy: false,
+    });
   } catch (error) {
     setStatus({ title: "Error", message: error.message, variant: "error", busy: false });
   } finally {
     stopStatusPolling();
     applyBusyState({ generate: false, refine: false, rerun: false, confirm: false });
+    updateWorkspaceModeUI();
   }
 }
 
@@ -589,8 +742,17 @@ async function restoreVersion(versionId) {
       body: JSON.stringify({}),
     });
     currentDraftVersionId = result.currentDraftVersionId;
-    renderDraft(result.draft);
+    currentActionGuideVersionId = result.currentActionGuideVersionId ?? currentActionGuideVersionId;
+    if (result.draft) {
+      renderDraft(result.draft);
+    }
+    if ("actionGuide" in result) {
+      renderActionGuide(result.actionGuide);
+    }
+    workspaceMode = result.mode || workspaceMode;
+    actionGuideOutdated = Boolean(result.actionGuideOutdated);
     renderVersionMeta();
+    updateWorkspaceModeUI();
     await loadVersions();
     setStatus({ title: "Ready", message: "Version restored.", variant: "idle", busy: false });
   } catch (error) {
@@ -598,38 +760,70 @@ async function restoreVersion(versionId) {
   } finally {
     stopStatusPolling();
     applyBusyState({ generate: false, refine: false, rerun: false, confirm: false });
+    updateWorkspaceModeUI();
   }
 }
 
-async function confirmDraft() {
+async function confirmIis() {
   if (!currentSessionId) {
     return;
   }
   syncDraftFromEditor();
-  setStatus({ title: "In Progress", message: "Confirming final draft...", variant: "busy", busy: true });
+  setStatus({ title: "In Progress", message: "Generating Implementation Action Guide...", variant: "busy", busy: true });
   applyBusyState({ generate: true, refine: true, rerun: true, confirm: true });
   startStatusPolling(currentSessionId);
 
   try {
-    const result = await fetchJson(`/api/sessions/${currentSessionId}/confirm`, {
+    const result = await fetchJson(`/api/sessions/${currentSessionId}/confirm-iis`, {
       method: "POST",
       body: JSON.stringify({ currentDraft }),
     });
-    document.getElementById("draftEditor").value = result.exportText;
-    if (currentDraft) {
-      currentDraft = {
-        ...currentDraft,
-        raw_text: result.exportText,
-      };
-    }
+    renderDraft(result.draft);
+    renderActionGuide(result.actionGuide);
+    workspaceMode = result.mode || "action_guide_mode";
+    confirmedIisVersionId = result.confirmedIisVersionId ?? confirmedIisVersionId;
+    currentActionGuideVersionId = result.currentActionGuideVersionId ?? currentActionGuideVersionId;
+    actionGuideOutdated = false;
     renderVersionMeta();
+    updateWorkspaceModeUI();
     await loadVersions();
-    setStatus({ title: "Confirmed", message: "Final draft confirmed.", variant: "idle", busy: false });
+    setStatus({ title: "Ready", message: "Implementation Action Guide generated from the confirmed IIS.", variant: "idle", busy: false });
   } catch (error) {
     setStatus({ title: "Error", message: error.message, variant: "error", busy: false });
   } finally {
     stopStatusPolling();
     applyBusyState({ generate: false, refine: false, rerun: false, confirm: false });
+    updateWorkspaceModeUI();
+  }
+}
+
+async function reopenIis() {
+  if (!currentSessionId) {
+    return;
+  }
+  setStatus({ title: "In Progress", message: "Reopening Implementation Intent Specification...", variant: "busy", busy: true });
+  applyBusyState({ generate: true, refine: true, rerun: true, confirm: true });
+  try {
+    const result = await fetchJson(`/api/sessions/${currentSessionId}/reopen-iis`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    workspaceMode = result.mode || "iis_mode";
+    actionGuideOutdated = Boolean(result.actionGuideOutdated);
+    if (result.draft) {
+      renderDraft(result.draft);
+    }
+    if ("actionGuide" in result) {
+      renderActionGuide(result.actionGuide);
+    }
+    renderVersionMeta();
+    updateWorkspaceModeUI();
+    setStatus({ title: "Ready", message: "Implementation Intent Specification reopened for editing.", variant: "idle", busy: false });
+  } catch (error) {
+    setStatus({ title: "Error", message: error.message, variant: "error", busy: false });
+  } finally {
+    applyBusyState({ generate: false, refine: false, rerun: false, confirm: false });
+    updateWorkspaceModeUI();
   }
 }
 
@@ -877,7 +1071,8 @@ function useImportedJiraEpic() {
 document.getElementById("loadButton").addEventListener("click", generate);
 document.getElementById("refineButton").addEventListener("click", refine);
 document.getElementById("rerunButton").addEventListener("click", rerunRetrieval);
-document.getElementById("confirmButton").addEventListener("click", confirmDraft);
+document.getElementById("confirmIisButton").addEventListener("click", confirmIis);
+document.getElementById("reopenIisButton").addEventListener("click", reopenIis);
 document.getElementById("draftEditor").addEventListener("input", () => {
   syncDraftFromEditor();
   renderVersionMeta();
@@ -905,3 +1100,4 @@ setupResizablePanels();
 resetWorkspace({ showWaiting: false });
 updateCurrentEpicBadge();
 renderSelectedJiraEpic();
+updateWorkspaceModeUI();

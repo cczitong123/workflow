@@ -1,4 +1,4 @@
-You are drafting a "What to Do" section for an implementation Epic.
+You are drafting an "Implementation Intent Specification" for an implementation Epic.
 
 Output JSON only with this schema:
 {

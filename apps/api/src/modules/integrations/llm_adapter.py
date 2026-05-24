@@ -9,8 +9,10 @@ from prompt_loader import load_fewshot_examples, render_prompt
 from modules.shared.models import (
     EvidenceItem,
     FileChange,
+    ImplementationActionGuide,
     OpenQuestion,
     ParsedWhatToDo,
+    RetrievalIntent,
     Step,
     WhatToDoDraft,
 )
@@ -72,6 +74,67 @@ def refine_draft(
         return _refine_local_draft(current, user_message, answered_questions, config)
     if mode == "remote":
         return _refine_remote_draft(current, user_message, answered_questions, config)
+    raise NotImplementedError(
+        f"LLM mode '{config.mode}' is not implemented yet. "
+        "Update modules/integrations/llm_adapter.py."
+    )
+
+
+def generate_action_guide(
+    description: str,
+    implementation_intent_specification: WhatToDoDraft,
+    retrieval_intent: RetrievalIntent,
+    evidence: list[EvidenceItem],
+    config: LlmApiConfig,
+    *,
+    source_iis_version_id: int | None,
+) -> ImplementationActionGuide:
+    mode = config.mode.lower().strip()
+    _log(f"generate_action_guide mode={mode}")
+    if mode == "mock":
+        return _generate_mock_action_guide(
+            implementation_intent_specification,
+            evidence,
+            source_iis_version_id=source_iis_version_id,
+        )
+    if mode == "local":
+        return _generate_local_action_guide(
+            description,
+            implementation_intent_specification,
+            retrieval_intent,
+            evidence,
+            config,
+            source_iis_version_id=source_iis_version_id,
+        )
+    if mode == "remote":
+        return _generate_remote_action_guide(
+            description,
+            implementation_intent_specification,
+            retrieval_intent,
+            evidence,
+            config,
+            source_iis_version_id=source_iis_version_id,
+        )
+    raise NotImplementedError(
+        f"LLM mode '{config.mode}' is not implemented yet. "
+        "Update modules/integrations/llm_adapter.py."
+    )
+
+
+def refine_action_guide(
+    current: ImplementationActionGuide,
+    user_message: str,
+    answered_questions: list[dict[str, str]],
+    config: LlmApiConfig,
+) -> ImplementationActionGuide:
+    mode = config.mode.lower().strip()
+    _log(f"refine_action_guide mode={mode}")
+    if mode == "mock":
+        return _refine_mock_action_guide(current, user_message, answered_questions)
+    if mode == "local":
+        return _refine_local_action_guide(current, user_message, answered_questions, config)
+    if mode == "remote":
+        return _refine_remote_action_guide(current, user_message, answered_questions, config)
     raise NotImplementedError(
         f"LLM mode '{config.mode}' is not implemented yet. "
         "Update modules/integrations/llm_adapter.py."
@@ -140,7 +203,7 @@ def _generate_mock_draft(
     ]
     reference_note = ""
     if references:
-        reference_note = " Draft format is guided by historical What-to-Do samples."
+        reference_note = " Draft format is guided by historical implementation samples."
     raw_text = _render_draft(steps, files_to_change)
     summary = f"Generated from description with {len(evidence)} evidence items.{reference_note}"
     return WhatToDoDraft(
@@ -150,6 +213,27 @@ def _generate_mock_draft(
         open_questions=open_questions,
         raw_text=raw_text,
         summary=summary,
+    )
+
+
+def _generate_mock_action_guide(
+    implementation_intent_specification: WhatToDoDraft,
+    evidence: list[EvidenceItem],
+    *,
+    source_iis_version_id: int | None,
+) -> ImplementationActionGuide:
+    what_to_do = [
+        step.actions[0] if step.actions else step.condition
+        for step in implementation_intent_specification.steps
+    ]
+    where_to_change = [item.path for item in evidence[:8]]
+    raw_text = _render_action_guide(what_to_do, where_to_change)
+    return ImplementationActionGuide(
+        version=1,
+        what_to_do=what_to_do,
+        where_to_change=where_to_change,
+        raw_text=raw_text,
+        source_iis_version_id=source_iis_version_id,
     )
 
 
@@ -211,6 +295,20 @@ def _generate_local_draft(
     )
 
 
+def _generate_local_action_guide(
+    description: str,
+    implementation_intent_specification: WhatToDoDraft,
+    retrieval_intent: RetrievalIntent,
+    evidence: list[EvidenceItem],
+    config: LlmApiConfig,
+    *,
+    source_iis_version_id: int | None,
+) -> ImplementationActionGuide:
+    raise NotImplementedError(
+        "Local LLM mode is selected, but local action-guide generation is not implemented yet."
+    )
+
+
 def _generate_remote_draft(
     description: str,
     evidence: list[EvidenceItem],
@@ -230,6 +328,39 @@ def _generate_remote_draft(
     _log(f"Draft generation response received. chars={len(payload)}")
     data = _parse_json_response(payload)
     return _draft_from_json(data, version=1)
+
+
+def _generate_remote_action_guide(
+    description: str,
+    implementation_intent_specification: WhatToDoDraft,
+    retrieval_intent: RetrievalIntent,
+    evidence: list[EvidenceItem],
+    config: LlmApiConfig,
+    *,
+    source_iis_version_id: int | None,
+) -> ImplementationActionGuide:
+    _log("Rendering implementation_action_guide_system prompt")
+    prompt = render_prompt(
+        "implementation_action_guide_system",
+        description=description,
+        implementation_intent_specification=json.dumps(
+            _draft_to_prompt(implementation_intent_specification),
+            ensure_ascii=False,
+            indent=2,
+        ),
+        retrieval_intent=json.dumps(
+            _retrieval_intent_to_prompt(retrieval_intent),
+            ensure_ascii=False,
+            indent=2,
+        ),
+        evidence=json.dumps([_evidence_to_prompt(item) for item in evidence], ensure_ascii=False, indent=2),
+        fewshot=json.dumps(load_fewshot_examples("implementation_action_guide_fewshot"), ensure_ascii=False, indent=2),
+    )
+    _log(f"Implementation action guide prompt rendered. chars={len(prompt)}")
+    payload = _call_remote_chat(prompt, config)
+    _log(f"Implementation action guide response received. chars={len(payload)}")
+    data = _parse_json_response(payload)
+    return _action_guide_from_json(data, version=1, source_iis_version_id=source_iis_version_id)
 
 
 def _refine_mock_draft(
@@ -276,6 +407,41 @@ def _refine_local_draft(
     )
 
 
+def _refine_mock_action_guide(
+    current: ImplementationActionGuide,
+    user_message: str,
+    answered_questions: list[dict[str, str]],
+) -> ImplementationActionGuide:
+    additions = []
+    if user_message.strip():
+        additions.append(user_message.strip())
+    additions.extend(
+        f"Resolved {item['id']}: {item['answer']}"
+        for item in answered_questions
+        if item.get("id") and item.get("answer")
+    )
+    what_to_do = list(current.what_to_do) + additions
+    raw_text = _render_action_guide(what_to_do, current.where_to_change)
+    return ImplementationActionGuide(
+        version=current.version + 1,
+        what_to_do=what_to_do,
+        where_to_change=current.where_to_change,
+        raw_text=raw_text,
+        source_iis_version_id=current.source_iis_version_id,
+    )
+
+
+def _refine_local_action_guide(
+    current: ImplementationActionGuide,
+    user_message: str,
+    answered_questions: list[dict[str, str]],
+    config: LlmApiConfig,
+) -> ImplementationActionGuide:
+    raise NotImplementedError(
+        "Local LLM mode is selected, but local action-guide refine is not implemented yet."
+    )
+
+
 def _refine_remote_draft(
     current: WhatToDoDraft,
     user_message: str,
@@ -295,6 +461,35 @@ def _refine_remote_draft(
     _log(f"Refine response received. chars={len(payload)}")
     data = _parse_json_response(payload)
     return _draft_from_json(data, version=current.version + 1)
+
+
+def _refine_remote_action_guide(
+    current: ImplementationActionGuide,
+    user_message: str,
+    answered_questions: list[dict[str, str]],
+    config: LlmApiConfig,
+) -> ImplementationActionGuide:
+    _log("Rendering refine_implementation_action_guide_system prompt")
+    prompt = render_prompt(
+        "refine_implementation_action_guide_system",
+        current_action_guide=json.dumps(
+            _action_guide_to_prompt(current),
+            ensure_ascii=False,
+            indent=2,
+        ),
+        user_message=user_message,
+        answered_questions=json.dumps(answered_questions, ensure_ascii=False, indent=2),
+        fewshot=json.dumps(load_fewshot_examples("implementation_action_guide_fewshot"), ensure_ascii=False, indent=2),
+    )
+    _log(f"Action guide refine prompt rendered. chars={len(prompt)}")
+    payload = _call_remote_chat(prompt, config)
+    _log(f"Action guide refine response received. chars={len(payload)}")
+    data = _parse_json_response(payload)
+    return _action_guide_from_json(
+        data,
+        version=current.version + 1,
+        source_iis_version_id=current.source_iis_version_id,
+    )
 
 
 def _render_draft(steps: list[Step], files_to_change: list[FileChange]) -> str:
@@ -462,6 +657,23 @@ def _draft_from_json(data: dict, version: int) -> WhatToDoDraft:
     )
 
 
+def _action_guide_from_json(
+    data: dict,
+    *,
+    version: int,
+    source_iis_version_id: int | None,
+) -> ImplementationActionGuide:
+    what_to_do = [str(item).strip() for item in data.get("what_to_do", []) if str(item).strip()]
+    where_to_change = [str(item).strip() for item in data.get("where_to_change", []) if str(item).strip()]
+    return ImplementationActionGuide(
+        version=version,
+        what_to_do=what_to_do,
+        where_to_change=where_to_change,
+        raw_text=_render_action_guide(what_to_do, where_to_change),
+        source_iis_version_id=source_iis_version_id,
+    )
+
+
 def _evidence_to_prompt(item: EvidenceItem) -> dict:
     return {
         "path": item.path,
@@ -469,6 +681,16 @@ def _evidence_to_prompt(item: EvidenceItem) -> dict:
         "why_relevant": item.why_relevant,
         "suggested_change": item.suggested_change,
         "location_hint": item.location_hint,
+    }
+
+
+def _retrieval_intent_to_prompt(intent: RetrievalIntent) -> dict:
+    return {
+        "summary": intent.summary,
+        "technical_intent": intent.technical_intent,
+        "keywords": intent.keywords,
+        "suspected_areas": intent.suspected_areas,
+        "query": intent.query,
     }
 
 
@@ -501,3 +723,22 @@ def _draft_to_prompt(draft: WhatToDoDraft) -> dict:
         ],
         "summary": draft.summary,
     }
+
+
+def _action_guide_to_prompt(action_guide: ImplementationActionGuide) -> dict:
+    return {
+        "version": action_guide.version,
+        "what_to_do": action_guide.what_to_do,
+        "where_to_change": action_guide.where_to_change,
+        "source_iis_version_id": action_guide.source_iis_version_id,
+    }
+
+
+def _render_action_guide(what_to_do: list[str], where_to_change: list[str]) -> str:
+    lines = ["## What to do", ""]
+    for item in what_to_do:
+        lines.append(f"- {item}")
+    lines.extend(["", "## Where to change", ""])
+    for item in where_to_change:
+        lines.append(f"- {item}")
+    return "\n".join(lines)

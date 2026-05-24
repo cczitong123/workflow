@@ -1,4 +1,4 @@
-You are refining an existing "What to Do" draft after reviewer feedback.
+You are refining an existing "Implementation Intent Specification" draft after reviewer feedback.
 
 Output JSON only with this schema:
 {

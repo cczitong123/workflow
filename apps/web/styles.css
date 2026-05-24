@@ -208,6 +208,27 @@ body {
   box-shadow: 0 16px 36px rgba(17, 33, 45, 0.12);
 }
 
+.artifact-surface,
+.artifact-block {
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.74);
+  border: 1px solid rgba(19, 60, 85, 0.08);
+  padding: 14px;
+}
+
+.artifact-block {
+  margin-top: 18px;
+}
+
+.artifact-header h3,
+.artifact-header p {
+  margin-top: 0;
+}
+
+.artifact-header {
+  margin-bottom: 12px;
+}
+
 .resize-handle {
   width: var(--handle-width);
   min-height: 75vh;
@@ -350,6 +371,10 @@ body {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
 }
 
+.artifact-surface-primary .editor {
+  margin-top: 0;
+}
+
 .editor.short {
   min-height: 100px;
 }
@@ -420,6 +445,42 @@ body {
   max-height: 240px;
   overflow: auto;
   opacity: 1;
+}
+
+.action-guide-surface {
+  padding: 16px;
+}
+
+.action-guide-surface.is-empty {
+  display: none;
+}
+
+.action-guide-section + .action-guide-section {
+  margin-top: 18px;
+}
+
+.action-guide-section h4 {
+  margin: 0 0 8px;
+  color: #173042;
+}
+
+.action-guide-list {
+  padding-left: 18px;
+}
+
+.action-guide-empty-state {
+  display: block;
+  margin-bottom: 0;
+}
+
+.outdated-banner {
+  margin-bottom: 12px;
+  border-radius: 12px;
+  background: rgba(255, 214, 102, 0.22);
+  color: #7b4b00;
+  padding: 12px 14px;
+  border: 1px solid rgba(206, 158, 31, 0.28);
+  font-size: 14px;
 }
 
 .surface-list.display-surface.is-empty {

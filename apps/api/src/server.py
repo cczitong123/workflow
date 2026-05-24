@@ -15,12 +15,15 @@ from modules.epics.repository import EpicRepository
 from modules.integrations.code_rag_adapter import retrieve_code_evidence
 from modules.integrations.llm_adapter import (
     build_retrieval_intent,
+    generate_action_guide,
     generate_draft,
+    refine_action_guide,
     refine_draft,
 )
 from modules.sessions.store import SessionStore
 from modules.shared.models import (
     FileChange,
+    ImplementationActionGuide,
     OpenQuestion,
     RetrievalIntent,
     Step,
@@ -106,6 +109,21 @@ def _draft_from_payload(payload: dict, fallback_version: int) -> WhatToDoDraft:
     )
 
 
+def _action_guide_from_payload(payload: dict, fallback_version: int) -> ImplementationActionGuide:
+    what_to_do = [str(item).strip() for item in payload.get("what_to_do", []) if str(item).strip()]
+    where_to_change = [str(item).strip() for item in payload.get("where_to_change", []) if str(item).strip()]
+    raw_text = "\n".join(
+        ["## What to do", "", *[f"- {item}" for item in what_to_do], "", "## Where to change", "", *[f"- {item}" for item in where_to_change]]
+    )
+    return ImplementationActionGuide(
+        version=int(payload.get("version", fallback_version)),
+        what_to_do=what_to_do,
+        where_to_change=where_to_change,
+        raw_text=raw_text,
+        source_iis_version_id=payload.get("source_iis_version_id"),
+    )
+
+
 def _sync_manual_draft_if_needed(session, payload: dict) -> None:
     if SESSIONS is None or session.draft is None:
         return
@@ -131,6 +149,24 @@ def _sync_manual_draft_if_needed(session, payload: dict) -> None:
         {"draftVersionId": draft_version_id},
     )
     log_event("DRAFT", f"Session {session.id} saved manual editor changes as version_id={draft_version_id}")
+
+
+def _render_action_guide_markdown(guide: ImplementationActionGuide | None) -> str:
+    if guide is None:
+        return ""
+    lines = ["## What to do", ""]
+    lines.extend(f"- {item}" for item in guide.what_to_do)
+    lines.extend(["", "## Where to change", ""])
+    lines.extend(f"- {item}" for item in guide.where_to_change)
+    return "\n".join(lines)
+
+
+def _mark_action_guide_outdated_if_needed(session) -> None:
+    if session.confirmed_iis_version_id is None:
+        return
+    if session.current_draft_version_id is None:
+        return
+    session.action_guide_outdated = session.current_draft_version_id != session.confirmed_iis_version_id
 
 
 def _serialize_epic_record(record) -> dict:
@@ -188,6 +224,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 {
                     "sessionId": session.id,
                     "currentDraftVersionId": session.current_draft_version_id,
+                    "currentActionGuideVersionId": session.current_action_guide_version_id,
                     "versions": to_dict(SESSIONS.list_draft_versions(session_id)),
                 }
             )
@@ -202,11 +239,16 @@ class AppHandler(BaseHTTPRequestHandler):
                     "status": session.status,
                     "currentPhase": session.current_phase,
                     "currentMessage": session.current_message,
+                    "mode": session.mode,
+                    "actionGuideOutdated": session.action_guide_outdated,
+                    "confirmedIisVersionId": session.confirmed_iis_version_id,
                     "currentDraftVersionId": session.current_draft_version_id,
+                    "currentActionGuideVersionId": session.current_action_guide_version_id,
                     "currentRetrievalVersionId": session.current_retrieval_version_id,
                     "retrievalIntent": to_dict(session.retrieval_intent) if session.retrieval_intent else None,
                     "evidence": to_dict(session.evidence),
                     "draft": to_dict(session.draft) if session.draft else None,
+                    "actionGuide": to_dict(session.action_guide) if session.action_guide else None,
                 }
             )
             return
@@ -369,16 +411,16 @@ class AppHandler(BaseHTTPRequestHandler):
                     session,
                     status="generating",
                     phase="drafting",
-                    message="Drafting What to Do...",
+                    message="Generating Implementation Intent Specification...",
                 )
-                log_event("STEP-4", "Generating draft")
+                log_event("STEP-4", "Generating Implementation Intent Specification")
                 draft = generate_draft(
                     session.input_description,
                     evidence,
                     references,
                     APP_CONFIG.llm_api,
                 )
-                log_event("STEP-4", f"Draft generated. steps={len(draft.steps)} files={len(draft.files_to_change)}")
+                log_event("STEP-4", f"IIS generated. steps={len(draft.steps)} files={len(draft.files_to_change)}")
 
                 session.retrieval_intent = intent
                 session.evidence = evidence
@@ -391,11 +433,16 @@ class AppHandler(BaseHTTPRequestHandler):
                     source_type="initial_generate",
                     retrieval_version_id=retrieval_version_id,
                 )
+                SESSIONS.update_session_metadata(
+                    session,
+                    mode="iis_mode",
+                    action_guide_outdated=False,
+                )
                 SESSIONS.update_runtime_state(
                     session,
                     status="generated",
                     phase="done",
-                    message="Draft generated.",
+                    message="Implementation Intent Specification generated.",
                 )
 
                 ground_truth = None
@@ -409,6 +456,10 @@ class AppHandler(BaseHTTPRequestHandler):
                         "evidence": to_dict(evidence),
                         "referenceSamples": to_dict(references),
                         "draft": to_dict(draft),
+                        "actionGuide": None,
+                        "mode": session.mode,
+                        "actionGuideOutdated": session.action_guide_outdated,
+                        "confirmedIisVersionId": session.confirmed_iis_version_id,
                         "groundTruth": to_dict(ground_truth),
                     }
                 )
@@ -418,13 +469,9 @@ class AppHandler(BaseHTTPRequestHandler):
                 session_id = parsed.path.split("/")[-2]
                 session = SESSIONS.get(session_id)
                 log_event("REFINE", f"Session {session_id} refine started")
-                if session.draft is None:
-                    self._json({"error": "Draft not generated yet."}, status=HTTPStatus.BAD_REQUEST)
-                    return
                 if APP_CONFIG is None:
                     self._json({"error": "Application config is not loaded."}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                     return
-                _sync_manual_draft_if_needed(session, payload)
                 user_message = payload.get("userMessage", "")
                 answered = payload.get("answeredQuestions", [])
                 SESSIONS.save_user_event(
@@ -433,11 +480,53 @@ class AppHandler(BaseHTTPRequestHandler):
                     "user",
                     {"userMessage": user_message, "answeredQuestions": answered},
                 )
+
+                if session.mode == "action_guide_mode":
+                    if session.action_guide is None:
+                        self._json({"error": "Implementation Action Guide not generated yet."}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    SESSIONS.update_runtime_state(
+                        session,
+                        status="refining",
+                        phase="refining_action_guide",
+                        message="Refining Implementation Action Guide...",
+                    )
+                    action_guide = refine_action_guide(session.action_guide, user_message, answered, APP_CONFIG.llm_api)
+                    session.action_guide = action_guide
+                    session.action_guide_history.append(action_guide)
+                    SESSIONS.save_action_guide_version(
+                        session,
+                        action_guide,
+                        source_type="refine",
+                    )
+                    SESSIONS.update_runtime_state(
+                        session,
+                        status="generated",
+                        phase="done",
+                        message="Implementation Action Guide refined.",
+                    )
+                    log_event(
+                        "REFINE",
+                        f"Session {session_id} action guide refine completed. version={action_guide.version}",
+                    )
+                    self._json(
+                        {
+                            "actionGuide": to_dict(action_guide),
+                            "mode": session.mode,
+                            "actionGuideOutdated": session.action_guide_outdated,
+                        }
+                    )
+                    return
+
+                if session.draft is None:
+                    self._json({"error": "Implementation Intent Specification not generated yet."}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                _sync_manual_draft_if_needed(session, payload)
                 SESSIONS.update_runtime_state(
                     session,
                     status="refining",
-                    phase="refining",
-                    message="Refining draft...",
+                    phase="refining_iis",
+                    message="Refining Implementation Intent Specification...",
                 )
                 draft = refine_draft(session.draft, user_message, answered, APP_CONFIG.llm_api)
                 session.draft = draft
@@ -448,16 +537,24 @@ class AppHandler(BaseHTTPRequestHandler):
                     source_type="refine",
                     retrieval_version_id=session.current_retrieval_version_id,
                 )
+                _mark_action_guide_outdated_if_needed(session)
+                SESSIONS.update_session_metadata(
+                    session,
+                    mode="iis_mode",
+                    action_guide_outdated=session.action_guide_outdated,
+                )
                 SESSIONS.update_runtime_state(
                     session,
                     status="generated",
                     phase="done",
-                    message="Draft refined.",
+                    message="Implementation Intent Specification refined.",
                 )
                 log_event("REFINE", f"Session {session_id} refine completed. version={draft.version}")
                 self._json(
                     {
                         "draft": to_dict(draft),
+                        "mode": session.mode,
+                        "actionGuideOutdated": session.action_guide_outdated,
                         "diffSummary": [
                             "Appended reviewer guidance as an extra action block.",
                             "Marked answered questions and preserved unresolved ones.",
@@ -470,6 +567,12 @@ class AppHandler(BaseHTTPRequestHandler):
                 session_id = parsed.path.split("/")[-2]
                 session = SESSIONS.get(session_id)
                 log_event("RERUN", f"Session {session_id} retrieval rerun started")
+                if session.mode == "action_guide_mode":
+                    self._json(
+                        {"error": "Reopen the Implementation Intent Specification before rerunning retrieval."},
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
+                    return
                 if APP_CONFIG is None:
                     self._json({"error": "Application config is not loaded."}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                     return
@@ -528,7 +631,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     session,
                     status="rerunning_retrieval",
                     phase="drafting",
-                    message="Drafting What to Do...",
+                    message="Regenerating Implementation Intent Specification...",
                 )
                 reference_records = [
                     record.parsed_what_to_do
@@ -554,17 +657,24 @@ class AppHandler(BaseHTTPRequestHandler):
                     source_type="rerun_retrieval",
                     retrieval_version_id=retrieval_version_id,
                 )
+                _mark_action_guide_outdated_if_needed(session)
+                SESSIONS.update_session_metadata(
+                    session,
+                    mode="iis_mode",
+                    action_guide_outdated=session.action_guide_outdated,
+                )
                 SESSIONS.update_runtime_state(
                     session,
                     status="generated",
                     phase="done",
-                    message="Retrieval rerun completed.",
+                    message="Retrieval rerun completed. Implementation Intent Specification updated.",
                 )
                 self._json(
                     {
                         "retrievalIntent": to_dict(intent),
                         "evidence": to_dict(evidence),
                         "draft": to_dict(draft),
+                        "actionGuideOutdated": session.action_guide_outdated,
                     }
                 )
                 return
@@ -581,12 +691,36 @@ class AppHandler(BaseHTTPRequestHandler):
                     phase="restoring_version",
                     message="Restoring selected version...",
                 )
-                draft, new_version_id = SESSIONS.restore_draft_version(session, version_id)
+                restored_artifact, new_version_id, artifact_type = SESSIONS.restore_draft_version(session, version_id)
+                if artifact_type == "action_guide":
+                    session.action_guide = restored_artifact
+                    SESSIONS.update_session_metadata(
+                        session,
+                        mode="action_guide_mode",
+                        current_action_guide_version_id=new_version_id,
+                        action_guide_outdated=(
+                            session.confirmed_iis_version_id is not None
+                            and restored_artifact.source_iis_version_id != session.confirmed_iis_version_id
+                        ),
+                    )
+                else:
+                    session.draft = restored_artifact
+                    _mark_action_guide_outdated_if_needed(session)
+                    SESSIONS.update_session_metadata(
+                        session,
+                        mode="iis_mode",
+                        current_draft_version_id=new_version_id,
+                        action_guide_outdated=session.action_guide_outdated,
+                    )
                 SESSIONS.save_user_event(
                     session.id,
                     "restore_version",
                     "user",
-                    {"restoredFromVersionId": version_id, "newVersionId": new_version_id},
+                    {
+                        "restoredFromVersionId": version_id,
+                        "newVersionId": new_version_id,
+                        "artifactType": artifact_type,
+                    },
                 )
                 SESSIONS.update_runtime_state(
                     session,
@@ -596,8 +730,12 @@ class AppHandler(BaseHTTPRequestHandler):
                 )
                 self._json(
                     {
-                        "draft": to_dict(draft),
+                        "draft": to_dict(session.draft) if session.draft else None,
+                        "actionGuide": to_dict(session.action_guide) if session.action_guide else None,
                         "currentDraftVersionId": session.current_draft_version_id,
+                        "currentActionGuideVersionId": session.current_action_guide_version_id,
+                        "mode": session.mode,
+                        "actionGuideOutdated": session.action_guide_outdated,
                     }
                 )
                 return
@@ -610,14 +748,14 @@ class AppHandler(BaseHTTPRequestHandler):
                     session,
                     status="confirming",
                     phase="confirming",
-                    message="Confirming final draft...",
+                    message="Confirming final IIS export...",
                 )
                 SESSIONS.save_user_event(session.id, "confirm_session", "user", {})
                 SESSIONS.update_runtime_state(
                     session,
                     status="confirmed",
                     phase="done",
-                    message="Final draft confirmed.",
+                    message="Final IIS export confirmed.",
                 )
                 log_event("CONFIRM", f"Session {session_id} confirmed")
                 self._json(
@@ -625,6 +763,104 @@ class AppHandler(BaseHTTPRequestHandler):
                         "sessionId": session.id,
                         "finalDraft": to_dict(session.draft),
                         "exportText": session.draft.raw_text if session.draft else "",
+                    }
+                )
+                return
+
+            if parsed.path.endswith("/confirm-iis"):
+                session_id = parsed.path.split("/")[-2]
+                session = SESSIONS.get(session_id)
+                if session.draft is None or session.retrieval_intent is None:
+                    self._json(
+                        {"error": "Implementation Intent Specification is not ready yet."},
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+                if APP_CONFIG is None:
+                    self._json({"error": "Application config is not loaded."}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                    return
+                _sync_manual_draft_if_needed(session, payload)
+                SESSIONS.update_runtime_state(
+                    session,
+                    status="confirming",
+                    phase="generating_action_guide",
+                    message="Generating Implementation Action Guide...",
+                )
+                confirmed_iis_version_id = session.current_draft_version_id
+                action_guide = generate_action_guide(
+                    session.input_description,
+                    session.draft,
+                    session.retrieval_intent,
+                    session.evidence,
+                    APP_CONFIG.llm_api,
+                    source_iis_version_id=confirmed_iis_version_id,
+                )
+                session.action_guide = action_guide
+                session.action_guide_history.append(action_guide)
+                action_guide_version_id = SESSIONS.save_action_guide_version(
+                    session,
+                    action_guide,
+                    source_type="generated_from_confirmed_iis",
+                )
+                SESSIONS.update_session_metadata(
+                    session,
+                    mode="action_guide_mode",
+                    confirmed_iis_version_id=confirmed_iis_version_id,
+                    current_action_guide_version_id=action_guide_version_id,
+                    action_guide_outdated=False,
+                )
+                SESSIONS.save_user_event(
+                    session.id,
+                    "confirm_iis",
+                    "user",
+                    {
+                        "iisVersionId": confirmed_iis_version_id,
+                        "actionGuideVersionId": action_guide_version_id,
+                    },
+                )
+                SESSIONS.update_runtime_state(
+                    session,
+                    status="generated",
+                    phase="done",
+                    message="Implementation Action Guide generated from the confirmed IIS.",
+                )
+                self._json(
+                    {
+                        "draft": to_dict(session.draft),
+                        "actionGuide": to_dict(action_guide),
+                        "mode": session.mode,
+                        "confirmedIisVersionId": session.confirmed_iis_version_id,
+                        "currentActionGuideVersionId": session.current_action_guide_version_id,
+                    }
+                )
+                return
+
+            if parsed.path.endswith("/reopen-iis"):
+                session_id = parsed.path.split("/")[-2]
+                session = SESSIONS.get(session_id)
+                if session.draft is None:
+                    self._json(
+                        {"error": "Implementation Intent Specification is not ready yet."},
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+                SESSIONS.save_user_event(session.id, "reopen_iis", "user", {})
+                SESSIONS.update_session_metadata(
+                    session,
+                    mode="iis_mode",
+                )
+                SESSIONS.update_runtime_state(
+                    session,
+                    status="generated",
+                    phase="done",
+                    message="Implementation Intent Specification reopened for editing.",
+                )
+                self._json(
+                    {
+                        "draft": to_dict(session.draft),
+                        "actionGuide": to_dict(session.action_guide) if session.action_guide else None,
+                        "mode": session.mode,
+                        "actionGuideOutdated": session.action_guide_outdated,
                     }
                 )
                 return
@@ -679,7 +915,7 @@ class AppHandler(BaseHTTPRequestHandler):
 
 
 def resolve_runtime_settings() -> tuple[str, int, Path]:
-    parser = argparse.ArgumentParser(description="Run the offline Epic What-to-Do workbench.")
+    parser = argparse.ArgumentParser(description="Run the offline Epic implementation workbench.")
     defaults = load_app_config()
     parser.add_argument("--host", default=defaults.host)
     parser.add_argument("--port", type=int, default=defaults.port)

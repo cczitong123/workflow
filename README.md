@@ -1,6 +1,6 @@
 # Agentic-Workflow
 
-Agentic-Workflow is an Epic analysis workbench for turning an Epic description into a structured `What to Do` draft, with code retrieval, refinement, version history, and local traceable persistence.
+Agentic-Workflow is an Epic analysis workbench for turning an Epic description into an `Implementation Intent Specification`, then deriving a finer-grained `Implementation Action Guide`, with code retrieval, refinement, version history, and local traceable persistence.
 
 ## What the application currently does
 
@@ -10,11 +10,13 @@ The current UI-driven flow is:
 2. The Epic description is summarized into retrieval intent.
 3. A retrieval query is generated from the description and summarized intent.
 4. Code evidence is retrieved from a local embedding model and local vector store.
-5. A `What to Do` draft is generated through the configured LLM mode.
-6. The draft can be refined without rebuilding evidence.
-7. Retrieval can be explicitly re-run with the latest answers and notes.
-8. Draft versions can be restored from version history.
-9. Workflow state is persisted locally in SQLite.
+5. An `Implementation Intent Specification` (IIS) is generated through the configured LLM mode.
+6. The IIS can be refined without rebuilding evidence.
+7. Retrieval can be explicitly re-run with the latest answers and notes while the workbench is still in IIS mode.
+8. The current IIS version can be confirmed to generate an `Implementation Action Guide`.
+9. The IIS can later be reopened for editing, which marks the current Action Guide as outdated until it is regenerated.
+10. Version history can restore both IIS and Action Guide artifacts.
+11. Workflow state is persisted locally in SQLite.
 
 The backend still contains a local Epic repository under `data/epics/` for development support and normalization compatibility, but the current browser workbench is centered on Jira import rather than local file browsing.
 
@@ -64,7 +66,7 @@ The backend still contains a local Epic repository under `data/epics/` for devel
 ### Integration layer
 
 - `/apps/api/src/modules/integrations/llm_adapter.py`
-  Retrieval-intent generation, retrieval-query generation, draft generation, refinement, remote authentication, token caching, and response parsing are handled here.
+  Retrieval-intent generation, retrieval-query generation, IIS generation, Action Guide generation, refinement, remote authentication, token caching, and response parsing are handled here.
 
 - `/apps/api/src/modules/integrations/code_rag_adapter.py`
   Code-evidence retrieval is handled here. Local embedding loading, vector-store loading, FAISS search, ranking, and evidence shaping are defined here.
@@ -72,10 +74,10 @@ The backend still contains a local Epic repository under `data/epics/` for devel
 ### Session, versions, and persistence
 
 - `/apps/api/src/modules/sessions/store.py`
-  Local workflow persistence is handled here. SQLite tables for sessions, retrieval versions, evidence snapshots, draft versions, and user events are created and maintained here.
+  Local workflow persistence is handled here. SQLite tables for sessions, retrieval versions, evidence snapshots, artifact versions, and user events are created and maintained here.
 
 - `/apps/api/src/modules/shared/models.py`
-  Shared internal data models are defined here. Session, retrieval intent, evidence, draft, version-record, and parsed Epic data classes live here.
+  Shared internal data models are defined here. Session, retrieval intent, evidence, IIS, Action Guide, version-record, and parsed Epic data classes live here.
 
 ## Prompt system
 
@@ -92,10 +94,16 @@ Prompt assets live in:
   Rules for turning the Epic context and retrieval intent into a code-search query.
 
 - `/apps/api/src/prompts/draft_generation_system.txt`
-  Rules for generating the `What to Do` draft from Epic input and code evidence.
+  Rules for generating the `Implementation Intent Specification` from Epic input and code evidence.
 
 - `/apps/api/src/prompts/refine_open_questions_system.txt`
-  Rules for refining the draft and generating or preserving open questions.
+  Rules for refining the IIS and generating or preserving open questions.
+
+- `/apps/api/src/prompts/implementation_action_guide_system.txt`
+  Rules for generating the `Implementation Action Guide` from the Epic description, retrieval intent, code evidence, and the confirmed IIS.
+
+- `/apps/api/src/prompts/refine_implementation_action_guide_system.txt`
+  Rules for refining the `Implementation Action Guide`.
 
 ### Few-shot JSON files
 
@@ -106,10 +114,13 @@ Prompt assets live in:
   Reserved interface for future retrieval-intent few-shot examples. Currently kept as an empty array unless explicitly populated.
 
 - `/apps/api/src/prompts/draft_generation_fewshot.json`
-  Reserved interface for future draft-generation few-shot examples. Currently kept as an empty array unless explicitly populated.
+  Reserved interface for future IIS-generation few-shot examples. Currently kept as an empty array unless explicitly populated.
 
 - `/apps/api/src/prompts/refine_open_questions_fewshot.json`
   Reserved interface for future refine/open-question few-shot examples. Currently kept as an empty array unless explicitly populated.
+
+- `/apps/api/src/prompts/implementation_action_guide_fewshot.json`
+  Few-shot examples for `description -> implementation action guide` mappings.
 
 ## Frontend architecture
 
@@ -120,7 +131,7 @@ Prompt assets live in:
   Workbench layout, visual hierarchy, resizable columns, display surfaces, modal sizing, sticky modal headers, editor styling, and button hierarchy are defined here.
 
 - `/apps/web/app.js`
-  Browser-side workflow logic is implemented here. Jira import, generate/refine/rerun/confirm actions, status polling, version rendering, restore actions, draft syncing, and UI state transitions are handled here.
+  Browser-side workflow logic is implemented here. Jira import, IIS generation/refinement, Action Guide generation/refinement, mode switching, status polling, version rendering, restore actions, editor syncing, and UI state transitions are handled here.
 
 ## Local data and persistence
 
@@ -128,7 +139,7 @@ Prompt assets live in:
   Local Epic JSON input files kept for development support, repository normalization, and compatibility testing.
 
 - `/data/agentic_workflow.sqlite3`
-  Local SQLite persistence store. Session state, retrieval snapshots, evidence items, draft versions, and user events are stored here.
+  Local SQLite persistence store. Session state, retrieval snapshots, evidence items, IIS versions, Action Guide versions, and user events are stored here.
 
 ## Tools for local export and inspection
 
@@ -176,12 +187,12 @@ The SQLite database stores:
 - sessions
 - retrieval versions
 - evidence items
-- draft versions
+- artifact versions
 - user events
 
 Many values inside the database are stored as JSON text fields, such as:
 
-- draft payloads
+- IIS and Action Guide payloads
 - retrieval keywords
 - suspected areas
 - event payloads
@@ -258,7 +269,8 @@ Typical edits:
 
 - retrieval-intent format
 - retrieval-query guidance
-- `What to Do` structure
+- `Implementation Intent Specification` structure
+- `Implementation Action Guide` structure
 - open-question style
 - refinement behavior
 - retrieval-query few-shot examples

@@ -1,6 +1,6 @@
 # Agentic-Workflow Architecture
 
-Agentic-Workflow is an Epic analysis workflow for turning Epic descriptions into structured `What to Do` drafts, with explicit retrieval, refinement, version history, and local persistence.
+Agentic-Workflow is an Epic analysis workflow for turning Epic descriptions into an `Implementation Intent Specification`, then deriving an `Implementation Action Guide`, with explicit retrieval, refinement, version history, and local persistence.
 
 This document describes the current implementation shape, the main execution flow, and the boundaries between the major parts of the system.
 
@@ -88,11 +88,13 @@ Primary file:
 Current workflow actions include:
 
 - session creation
-- initial draft generation
-- draft refinement
+- initial IIS generation
+- IIS refinement
+- IIS confirmation and Action Guide generation
+- IIS reopen
+- Action Guide refinement
 - retrieval re-run
 - version restore
-- final confirmation
 - partial progress exposure to the UI while generation is still running
 
 This layer should remain independent from the details of:
@@ -135,8 +137,10 @@ The LLM adapter currently handles:
 
 - retrieval-intent generation
 - retrieval-query generation
-- draft generation
-- refinement and open-question regeneration
+- IIS generation
+- Action Guide generation
+- IIS refinement and open-question regeneration
+- Action Guide refinement
 - remote authentication for BMW-style LLM access
 - token reuse through in-process caching
 - remote response parsing
@@ -185,13 +189,14 @@ The persistence layer currently stores enough information to support:
 - current session state
 - retrieval history
 - evidence snapshots
-- draft version history
+- IIS version history
+- Action Guide version history
 - restore operations
 - event-based trace reconstruction
 
 ## Main execution flow
 
-### Initial draft generation
+### Initial IIS generation
 
 The current initial path is:
 
@@ -202,20 +207,20 @@ The current initial path is:
 5. A retrieval query is generated from the Epic description and retrieval intent.
 6. Local code retrieval runs against the embedding store.
 7. Evidence is persisted as a retrieval version snapshot.
-8. A `What to Do` draft is generated from the Epic description and evidence.
-9. The draft is persisted as a draft version.
+8. An `Implementation Intent Specification` is generated from the Epic description and evidence.
+9. The IIS is persisted as an artifact version.
 10. Version history becomes available in the UI.
 
-### Refinement flow
+### IIS refinement flow
 
 The refine flow does not rebuild retrieval.
 
 It currently:
 
 1. syncs the editor text back to the backend if it was manually changed
-2. combines current draft state with user input and answered questions
-3. generates a new refined draft
-4. stores the result as a new draft version
+2. combines current IIS state with user input and answered questions
+3. generates a new refined IIS
+4. stores the result as a new IIS version
 
 Retrieval intent and evidence stay unchanged during refine.
 
@@ -225,19 +230,52 @@ The re-run retrieval flow is explicitly separated from refine.
 
 It currently:
 
-1. syncs the current draft if it was manually edited
+1. syncs the current IIS if it was manually edited
 2. reuses the original Epic description plus the latest user answers/notes
 3. regenerates retrieval intent and retrieval query
 4. reruns local code retrieval
 5. stores a new retrieval version
-6. regenerates the draft from the updated retrieval result
-7. stores the new draft as a new draft version
+6. regenerates the IIS from the updated retrieval result
+7. stores the new IIS as a new artifact version
 
 This separation is intentional so that:
 
-- refine remains lightweight and predictable
+- IIS refinement remains lightweight and predictable
 - retrieval changes are explicit
-- version history can distinguish pure draft edits from evidence changes
+- version history can distinguish pure IIS edits from evidence changes
+
+### IIS confirmation and Action Guide generation
+
+After the IIS is ready, the workflow enters a second stage:
+
+1. the current IIS version is confirmed
+2. the confirmed IIS version id is recorded in session state
+3. an `Implementation Action Guide` is generated from:
+   - the original Epic description
+   - the retrieval intent and retrieval query
+   - the current evidence set
+   - the confirmed IIS
+4. the Action Guide is stored as its own artifact version
+5. the workbench switches into Action Guide mode
+
+### IIS reopen and Action Guide invalidation
+
+The confirmed IIS is not permanently locked.
+
+Instead:
+
+1. the IIS can be reopened for editing
+2. the workbench switches back to IIS mode
+3. once the IIS changes, the current Action Guide is marked outdated
+4. the IIS must be reconfirmed to regenerate the Action Guide from the latest version
+
+### Action Guide refinement
+
+Once the Action Guide exists:
+
+1. the right-hand refine flow targets the Action Guide instead of the IIS
+2. the Action Guide is refined as its own artifact stream
+3. the guide keeps a link to the IIS version it was generated from
 
 ### Restore flow
 
@@ -245,9 +283,9 @@ Restore does not erase history.
 
 Instead:
 
-1. a previous draft version is selected
-2. its stored draft payload is loaded
-3. a new draft version is created from that older state
+1. a previous IIS or Action Guide version is selected
+2. its stored artifact payload is loaded
+3. a new artifact version is created from that older state
 
 This keeps the historical chain intact while allowing rollback in the UI.
 
@@ -263,6 +301,8 @@ Prompt assets live in:
 - `/apps/api/src/prompts/retrieval_query_system.txt`
 - `/apps/api/src/prompts/draft_generation_system.txt`
 - `/apps/api/src/prompts/refine_open_questions_system.txt`
+- `/apps/api/src/prompts/implementation_action_guide_system.txt`
+- `/apps/api/src/prompts/refine_implementation_action_guide_system.txt`
 
 ### Few-shot strategy
 
@@ -277,6 +317,7 @@ The following files are preserved as future extension points and can remain empt
 - `/apps/api/src/prompts/retrieval_intent_fewshot.json`
 - `/apps/api/src/prompts/draft_generation_fewshot.json`
 - `/apps/api/src/prompts/refine_open_questions_fewshot.json`
+- `/apps/api/src/prompts/implementation_action_guide_fewshot.json`
 
 This design keeps the interfaces stable while allowing future prompt enrichment without backend restructuring.
 
@@ -297,10 +338,10 @@ This panel is used for:
 
 This panel is the main work surface and is used for:
 
-- the current `What to Do` draft
-- manual editing
-- current version display
-- final confirmation
+- the current `Implementation Intent Specification`
+- IIS editing and confirmation
+- the current `Implementation Action Guide`
+- source-version and outdated state display
 
 ### Right panel: Review & History
 
@@ -309,7 +350,11 @@ This panel is used for:
 - open questions
 - refinement input
 - version history
-- historical `What-to-Do` reference
+
+The refine target changes by mode:
+
+- in IIS mode, refine updates the IIS
+- in Action Guide mode, refine updates the Action Guide
 
 ### UI progress model
 
@@ -320,11 +365,13 @@ Typical phases include:
 - generating retrieval intent
 - generating retrieval query
 - searching code evidence
-- drafting
-- refining
+- generating the IIS
+- refining the IIS
+- generating the Action Guide
+- refining the Action Guide
 - re-running retrieval
 - restoring version
-- confirming
+- confirming the IIS
 
 Partial results are exposed progressively so the UI can show:
 
@@ -356,7 +403,8 @@ Important persisted elements already include:
 - session metadata
 - retrieval versions
 - evidence snapshots
-- draft versions
+- IIS versions
+- Action Guide versions
 - user events
 
 This allows later reconstruction of:
