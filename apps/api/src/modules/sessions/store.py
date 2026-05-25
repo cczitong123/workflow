@@ -148,7 +148,7 @@ class SessionStore:
                     current_phase, current_message, mode, action_guide_outdated, confirmed_iis_version_id,
                     current_retrieval_version_id, current_draft_version_id, current_action_guide_version_id,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     session.id,

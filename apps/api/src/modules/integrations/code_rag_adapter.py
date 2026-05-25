@@ -241,6 +241,36 @@ def _resolve_local_config(config_data: dict[str, Any]) -> dict[str, Any]:
             "Local Code RAG requires AGENTIC_WORKFLOW_CODE_RAG_EMBEDDING_MODEL_PATH and "
             "AGENTIC_WORKFLOW_CODE_RAG_VECTOR_STORE_PATH to be set."
         )
+    embedding_model_path = str(config_data["embedding_model_path"]).strip()
+    vector_store_path = str(config_data["vector_store_path"]).strip()
+
+    placeholder_values = {
+        "PASTE_LOCAL_EMBEDDING_MODEL_PATH_HERE",
+        "PASTE_LOCAL_VECTOR_STORE_JSON_PATH_HERE",
+    }
+    if embedding_model_path in placeholder_values or vector_store_path in placeholder_values:
+        raise RuntimeError(
+            "Local Code RAG is enabled, but the .env file still contains placeholder values for "
+            "AGENTIC_WORKFLOW_CODE_RAG_EMBEDDING_MODEL_PATH or "
+            "AGENTIC_WORKFLOW_CODE_RAG_VECTOR_STORE_PATH. Replace them with real local paths, "
+            "or switch AGENTIC_WORKFLOW_CODE_RAG_MODE to 'mock' if local retrieval is not ready yet."
+        )
+
+    missing_paths: list[str] = []
+    if not Path(embedding_model_path).exists():
+        missing_paths.append(
+            f"embedding model path does not exist: {embedding_model_path}"
+        )
+    if not Path(vector_store_path).exists():
+        missing_paths.append(
+            f"vector store path does not exist: {vector_store_path}"
+        )
+    if missing_paths:
+        raise RuntimeError(
+            "Local Code RAG is enabled, but required local assets are missing: "
+            + "; ".join(missing_paths)
+            + ". Update the .env paths or switch AGENTIC_WORKFLOW_CODE_RAG_MODE to 'mock'."
+        )
     return config_data
 
 

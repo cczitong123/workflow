@@ -73,8 +73,9 @@
           <div class="editor-state" id="draftWaiting"></div>
           <textarea id="draftEditor" class="editor"></textarea>
           <div class="button-row">
-            <button id="confirmIisButton" class="button-primary">Confirm IIS and Generate Action Guide</button>
+            <button id="confirmIisButton" class="button-primary">Confirm IIS</button>
             <button id="reopenIisButton" class="button-secondary hidden">Reopen IIS</button>
+            <button id="generateActionGuideButton" class="button-secondary">Generate Action Guide</button>
           </div>
         </div>
         <div class="artifact-block">
@@ -85,20 +86,13 @@
             </div>
           </div>
           <div id="actionGuideEmptyState" class="editor-state action-guide-empty-state">
-            Confirm the current Implementation Intent Specification to generate the Implementation Action Guide.
+            Confirm the current Implementation Intent Specification, then use Generate Action Guide to create the first guide draft.
           </div>
           <div id="actionGuideOutdated" class="outdated-banner hidden">
             Current IIS has changed. Reconfirm to regenerate this guide.
           </div>
           <div id="actionGuideSurface" class="surface-panel display-surface action-guide-surface is-empty">
-            <section class="action-guide-section">
-              <h4>What to do</h4>
-              <ul id="actionGuideWhatToDo" class="list action-guide-list"></ul>
-            </section>
-            <section class="action-guide-section">
-              <h4>Where to change</h4>
-              <ul id="actionGuideWhereToChange" class="list action-guide-list"></ul>
-            </section>
+            <textarea id="actionGuideEditor" class="editor short action-guide-editor"></textarea>
           </div>
         </div>
       </section>

@@ -129,12 +129,13 @@ function setStatus({ title, message, variant = "idle", busy = false }) {
   document.getElementById("statusMessage").textContent = message;
 }
 
-function applyBusyState({ generate = false, refine = false, rerun = false, confirm = false }) {
+function applyBusyState({ generate = false, refine = false, rerun = false, confirm = false, actionGuide = false }) {
   document.getElementById("loadButton").disabled = generate;
   document.getElementById("refineButton").disabled = refine;
   document.getElementById("rerunButton").disabled = rerun;
   document.getElementById("confirmIisButton").disabled = confirm;
   document.getElementById("reopenIisButton").disabled = confirm;
+  document.getElementById("generateActionGuideButton").disabled = actionGuide;
 }
 
 function updateCurrentEpicBadge() {
@@ -154,6 +155,7 @@ function updateCurrentEpicBadge() {
 function updateWorkspaceModeUI() {
   const confirmButton = document.getElementById("confirmIisButton");
   const reopenButton = document.getElementById("reopenIisButton");
+  const generateActionGuideButton = document.getElementById("generateActionGuideButton");
   const refineHeading = document.getElementById("refineHeading");
   const refineInput = document.getElementById("refineInput");
   const refineButton = document.getElementById("refineButton");
@@ -161,6 +163,7 @@ function updateWorkspaceModeUI() {
   const actionGuideOutdatedNode = document.getElementById("actionGuideOutdated");
   const emptyState = document.getElementById("actionGuideEmptyState");
   const draftEditor = document.getElementById("draftEditor");
+  const actionGuideEditor = document.getElementById("actionGuideEditor");
   const rerunButton = document.getElementById("rerunButton");
 
   refineButton.disabled =
@@ -169,6 +172,13 @@ function updateWorkspaceModeUI() {
   confirmButton.disabled = !currentSessionId || !currentDraft || workspaceMode === "action_guide_mode";
   reopenButton.disabled = !currentSessionId || workspaceMode !== "action_guide_mode";
   rerunButton.disabled = !currentSessionId || workspaceMode === "action_guide_mode";
+  generateActionGuideButton.disabled =
+    !currentSessionId ||
+    workspaceMode !== "action_guide_mode" ||
+    !currentDraft ||
+    currentDraftVersionId == null ||
+    confirmedIisVersionId == null ||
+    currentDraftVersionId !== confirmedIisVersionId;
 
   if (workspaceMode === "action_guide_mode") {
     refineHeading.textContent = "Refine Implementation Action Guide";
@@ -177,17 +187,20 @@ function updateWorkspaceModeUI() {
     confirmButton.classList.add("hidden");
     reopenButton.classList.remove("hidden");
     draftEditor.readOnly = true;
+    actionGuideEditor.readOnly = false;
   } else {
     refineHeading.textContent = "Refine Implementation Intent Specification";
     refineInput.placeholder = "Add reviewer guidance or answer a question to refine the current IIS...";
     refineButton.textContent = "Refine IIS";
     confirmButton.classList.remove("hidden");
     reopenButton.classList.add("hidden");
-    confirmButton.textContent = actionGuideOutdated
-      ? "Confirm IIS and Regenerate Action Guide"
-      : "Confirm IIS and Generate Action Guide";
+    confirmButton.textContent = "Confirm IIS";
     draftEditor.readOnly = false;
+    actionGuideEditor.readOnly = true;
   }
+
+  generateActionGuideButton.textContent =
+    currentActionGuide && actionGuideOutdated ? "Regenerate Action Guide" : "Generate Action Guide";
 
   if (currentActionGuide && currentActionGuide.source_iis_version_id) {
     actionGuideMeta.textContent = `Generated from IIS Version ${currentActionGuide.source_iis_version_id}`;
@@ -371,32 +384,19 @@ function renderDraft(draft) {
 function renderActionGuide(actionGuide) {
   currentActionGuide = actionGuide;
   const surface = document.getElementById("actionGuideSurface");
-  const whatToDoList = document.getElementById("actionGuideWhatToDo");
-  const whereToChangeList = document.getElementById("actionGuideWhereToChange");
-  whatToDoList.innerHTML = "";
-  whereToChangeList.innerHTML = "";
+  const editor = document.getElementById("actionGuideEditor");
 
   if (!actionGuide) {
     surface.classList.remove("is-filled");
     surface.classList.add("is-empty");
+    editor.value = "";
     updateWorkspaceModeUI();
     return;
   }
 
   surface.classList.remove("is-empty");
   surface.classList.add("is-filled");
-
-  (actionGuide.what_to_do || []).forEach((item) => {
-    const node = document.createElement("li");
-    node.textContent = item;
-    whatToDoList.appendChild(node);
-  });
-
-  (actionGuide.where_to_change || []).forEach((item) => {
-    const node = document.createElement("li");
-    node.textContent = item;
-    whereToChangeList.appendChild(node);
-  });
+  editor.value = actionGuide.raw_text || "";
 
   updateWorkspaceModeUI();
 }
@@ -411,6 +411,18 @@ function syncDraftFromEditor() {
     raw_text: editorValue,
   };
   return currentDraft;
+}
+
+function syncActionGuideFromEditor() {
+  if (!currentActionGuide) {
+    return null;
+  }
+  const editorValue = document.getElementById("actionGuideEditor").value;
+  currentActionGuide = {
+    ...currentActionGuide,
+    raw_text: editorValue,
+  };
+  return currentActionGuide;
 }
 
 function renderVersionMeta() {
@@ -533,6 +545,7 @@ function resetWorkspace({ showWaiting = false } = {}) {
   actionGuideOutdated = false;
   confirmedIisVersionId = null;
   document.getElementById("draftEditor").value = "";
+  document.getElementById("actionGuideEditor").value = "";
   document.getElementById("draftWaiting").textContent = showWaiting
     ? "Waiting for Implementation Intent Specification generation..."
     : "";
@@ -587,7 +600,7 @@ async function generate() {
     return;
   }
   setStatus({ title: "In Progress", message: "Preparing session...", variant: "busy", busy: true });
-  applyBusyState({ generate: true, refine: true, rerun: true, confirm: true });
+  applyBusyState({ generate: true, refine: true, rerun: true, confirm: true, actionGuide: true });
 
   try {
     const epic = epicInput.epic;
@@ -624,7 +637,7 @@ async function generate() {
     setStatus({ title: "Error", message: error.message, variant: "error", busy: false });
   } finally {
     stopStatusPolling();
-    applyBusyState({ generate: false, refine: false, rerun: false, confirm: false });
+    applyBusyState({ generate: false, refine: false, rerun: false, confirm: false, actionGuide: false });
     updateWorkspaceModeUI();
   }
 }
@@ -635,6 +648,8 @@ async function refine() {
   }
   if (workspaceMode === "iis_mode") {
     syncDraftFromEditor();
+  } else {
+    syncActionGuideFromEditor();
   }
   const { userMessage, answeredQuestions } = collectRefinePayload();
   setStatus({
@@ -646,7 +661,7 @@ async function refine() {
     variant: "busy",
     busy: true,
   });
-  applyBusyState({ generate: true, refine: true, rerun: true, confirm: true });
+  applyBusyState({ generate: true, refine: true, rerun: true, confirm: true, actionGuide: true });
   startStatusPolling(currentSessionId);
 
   try {
@@ -656,6 +671,7 @@ async function refine() {
         userMessage,
         answeredQuestions,
         currentDraft,
+        currentActionGuide,
       }),
     });
     if (refined.draft) {
@@ -680,7 +696,7 @@ async function refine() {
     setStatus({ title: "Error", message: error.message, variant: "error", busy: false });
   } finally {
     stopStatusPolling();
-    applyBusyState({ generate: false, refine: false, rerun: false, confirm: false });
+    applyBusyState({ generate: false, refine: false, rerun: false, confirm: false, actionGuide: false });
     updateWorkspaceModeUI();
   }
 }
@@ -692,7 +708,7 @@ async function rerunRetrieval() {
   syncDraftFromEditor();
   const { userMessage, answeredQuestions } = collectRefinePayload();
   setStatus({ title: "In Progress", message: "Re-running retrieval...", variant: "busy", busy: true });
-  applyBusyState({ generate: true, refine: true, rerun: true, confirm: true });
+  applyBusyState({ generate: true, refine: true, rerun: true, confirm: true, actionGuide: true });
   startStatusPolling(currentSessionId);
 
   try {
@@ -723,7 +739,7 @@ async function rerunRetrieval() {
     setStatus({ title: "Error", message: error.message, variant: "error", busy: false });
   } finally {
     stopStatusPolling();
-    applyBusyState({ generate: false, refine: false, rerun: false, confirm: false });
+    applyBusyState({ generate: false, refine: false, rerun: false, confirm: false, actionGuide: false });
     updateWorkspaceModeUI();
   }
 }
@@ -733,7 +749,7 @@ async function restoreVersion(versionId) {
     return;
   }
   setStatus({ title: "In Progress", message: "Restoring selected version...", variant: "busy", busy: true });
-  applyBusyState({ generate: true, refine: true, rerun: true, confirm: true });
+  applyBusyState({ generate: true, refine: true, rerun: true, confirm: true, actionGuide: true });
   startStatusPolling(currentSessionId);
 
   try {
@@ -759,7 +775,7 @@ async function restoreVersion(versionId) {
     setStatus({ title: "Error", message: error.message, variant: "error", busy: false });
   } finally {
     stopStatusPolling();
-    applyBusyState({ generate: false, refine: false, rerun: false, confirm: false });
+    applyBusyState({ generate: false, refine: false, rerun: false, confirm: false, actionGuide: false });
     updateWorkspaceModeUI();
   }
 }
@@ -769,9 +785,8 @@ async function confirmIis() {
     return;
   }
   syncDraftFromEditor();
-  setStatus({ title: "In Progress", message: "Generating Implementation Action Guide...", variant: "busy", busy: true });
-  applyBusyState({ generate: true, refine: true, rerun: true, confirm: true });
-  startStatusPolling(currentSessionId);
+  setStatus({ title: "In Progress", message: "Confirming Implementation Intent Specification...", variant: "busy", busy: true });
+  applyBusyState({ generate: true, refine: true, rerun: true, confirm: true, actionGuide: true });
 
   try {
     const result = await fetchJson(`/api/sessions/${currentSessionId}/confirm-iis`, {
@@ -779,20 +794,58 @@ async function confirmIis() {
       body: JSON.stringify({ currentDraft }),
     });
     renderDraft(result.draft);
+    workspaceMode = result.mode || "action_guide_mode";
+    confirmedIisVersionId = result.confirmedIisVersionId ?? confirmedIisVersionId;
+    if ("actionGuide" in result) {
+      renderActionGuide(result.actionGuide);
+    }
+    actionGuideOutdated = Boolean(result.actionGuideOutdated);
+    renderVersionMeta();
+    updateWorkspaceModeUI();
+    await loadVersions();
+    setStatus({ title: "Ready", message: "Implementation Intent Specification confirmed.", variant: "idle", busy: false });
+  } catch (error) {
+    setStatus({ title: "Error", message: error.message, variant: "error", busy: false });
+  } finally {
+    applyBusyState({ generate: false, refine: false, rerun: false, confirm: false, actionGuide: false });
+    updateWorkspaceModeUI();
+  }
+}
+
+async function generateActionGuide() {
+  if (!currentSessionId) {
+    return;
+  }
+  syncDraftFromEditor();
+  if (currentActionGuide) {
+    syncActionGuideFromEditor();
+  }
+  setStatus({ title: "In Progress", message: "Generating Implementation Action Guide...", variant: "busy", busy: true });
+  applyBusyState({ generate: true, refine: true, rerun: true, confirm: true, actionGuide: true });
+  startStatusPolling(currentSessionId);
+
+  try {
+    const result = await fetchJson(`/api/sessions/${currentSessionId}/generate-action-guide`, {
+      method: "POST",
+      body: JSON.stringify({ currentDraft, currentActionGuide }),
+    });
+    if (result.draft) {
+      renderDraft(result.draft);
+    }
     renderActionGuide(result.actionGuide);
     workspaceMode = result.mode || "action_guide_mode";
     confirmedIisVersionId = result.confirmedIisVersionId ?? confirmedIisVersionId;
     currentActionGuideVersionId = result.currentActionGuideVersionId ?? currentActionGuideVersionId;
-    actionGuideOutdated = false;
+    actionGuideOutdated = Boolean(result.actionGuideOutdated);
     renderVersionMeta();
     updateWorkspaceModeUI();
     await loadVersions();
-    setStatus({ title: "Ready", message: "Implementation Action Guide generated from the confirmed IIS.", variant: "idle", busy: false });
+    setStatus({ title: "Ready", message: "Implementation Action Guide generated.", variant: "idle", busy: false });
   } catch (error) {
     setStatus({ title: "Error", message: error.message, variant: "error", busy: false });
   } finally {
     stopStatusPolling();
-    applyBusyState({ generate: false, refine: false, rerun: false, confirm: false });
+    applyBusyState({ generate: false, refine: false, rerun: false, confirm: false, actionGuide: false });
     updateWorkspaceModeUI();
   }
 }
@@ -802,7 +855,7 @@ async function reopenIis() {
     return;
   }
   setStatus({ title: "In Progress", message: "Reopening Implementation Intent Specification...", variant: "busy", busy: true });
-  applyBusyState({ generate: true, refine: true, rerun: true, confirm: true });
+  applyBusyState({ generate: true, refine: true, rerun: true, confirm: true, actionGuide: true });
   try {
     const result = await fetchJson(`/api/sessions/${currentSessionId}/reopen-iis`, {
       method: "POST",
@@ -822,7 +875,7 @@ async function reopenIis() {
   } catch (error) {
     setStatus({ title: "Error", message: error.message, variant: "error", busy: false });
   } finally {
-    applyBusyState({ generate: false, refine: false, rerun: false, confirm: false });
+    applyBusyState({ generate: false, refine: false, rerun: false, confirm: false, actionGuide: false });
     updateWorkspaceModeUI();
   }
 }
@@ -1073,9 +1126,13 @@ document.getElementById("refineButton").addEventListener("click", refine);
 document.getElementById("rerunButton").addEventListener("click", rerunRetrieval);
 document.getElementById("confirmIisButton").addEventListener("click", confirmIis);
 document.getElementById("reopenIisButton").addEventListener("click", reopenIis);
+document.getElementById("generateActionGuideButton").addEventListener("click", generateActionGuide);
 document.getElementById("draftEditor").addEventListener("input", () => {
   syncDraftFromEditor();
   renderVersionMeta();
+});
+document.getElementById("actionGuideEditor").addEventListener("input", () => {
+  syncActionGuideFromEditor();
 });
 document.getElementById("jiraImportButton").addEventListener("click", openJiraModal);
 document.getElementById("jiraModalClose").addEventListener("click", closeJiraModal);
