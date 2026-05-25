@@ -9,6 +9,7 @@ let currentImportedEpic = null;
 let workspaceMode = "iis_mode";
 let actionGuideOutdated = false;
 let confirmedIisVersionId = null;
+let actionGuideBusy = false;
 const PANEL_STORAGE_KEY = "agentic-workflow-workspace-widths";
 
 const jiraState = {
@@ -173,6 +174,7 @@ function updateWorkspaceModeUI() {
   reopenButton.disabled = !currentSessionId || workspaceMode !== "action_guide_mode";
   rerunButton.disabled = !currentSessionId || workspaceMode === "action_guide_mode";
   generateActionGuideButton.disabled =
+    actionGuideBusy ||
     !currentSessionId ||
     workspaceMode !== "action_guide_mode" ||
     !currentDraft ||
@@ -820,6 +822,7 @@ async function generateActionGuide() {
   if (currentActionGuide) {
     syncActionGuideFromEditor();
   }
+  actionGuideBusy = true;
   setStatus({ title: "In Progress", message: "Generating Implementation Action Guide...", variant: "busy", busy: true });
   applyBusyState({ generate: true, refine: true, rerun: true, confirm: true, actionGuide: true });
   startStatusPolling(currentSessionId);
@@ -845,6 +848,7 @@ async function generateActionGuide() {
     setStatus({ title: "Error", message: error.message, variant: "error", busy: false });
   } finally {
     stopStatusPolling();
+    actionGuideBusy = false;
     applyBusyState({ generate: false, refine: false, rerun: false, confirm: false, actionGuide: false });
     updateWorkspaceModeUI();
   }

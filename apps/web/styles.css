@@ -451,6 +451,10 @@ body {
   padding: 16px;
 }
 
+.action-guide-editor {
+  min-height: 280px;
+}
+
 .action-guide-surface.is-empty {
   display: none;
 }
@@ -566,6 +570,39 @@ body {
 
 .button-row {
   margin-top: 12px;
+}
+
+.button-row-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.button-row-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.button-row-split > .button-primary,
+.button-row-left > button {
+  white-space: nowrap;
+}
+
+@media (max-width: 1380px) {
+  .button-row-split {
+    grid-template-columns: 1fr;
+  }
+
+  .button-row-left {
+    flex-wrap: wrap;
+  }
+
+  .button-row-split > .button-primary {
+    justify-self: start;
+  }
 }
 
 .hidden {
