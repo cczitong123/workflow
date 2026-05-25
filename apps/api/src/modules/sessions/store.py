@@ -91,6 +91,7 @@ class SessionStore:
                     source_type TEXT NOT NULL,
                     retrieval_version_id INTEGER,
                     source_iis_version_id INTEGER,
+                    source_iis_version_number INTEGER,
                     draft_json TEXT NOT NULL,
                     raw_text TEXT NOT NULL,
                     summary TEXT NOT NULL,
@@ -113,6 +114,7 @@ class SessionStore:
             self._ensure_column("sessions", "current_action_guide_version_id", "INTEGER")
             self._ensure_column("draft_versions", "artifact_type", "TEXT NOT NULL DEFAULT 'iis'")
             self._ensure_column("draft_versions", "source_iis_version_id", "INTEGER")
+            self._ensure_column("draft_versions", "source_iis_version_number", "INTEGER")
             self._connection.commit()
 
     def _ensure_column(self, table_name: str, column_name: str, ddl_suffix: str) -> None:
@@ -330,6 +332,7 @@ class SessionStore:
         retrieval_version_id: int | None,
         artifact_type: str = "iis",
         source_iis_version_id: int | None = None,
+        source_iis_version_number: int | None = None,
     ) -> int:
         created_at = _utc_now()
         with self._lock:
@@ -337,8 +340,8 @@ class SessionStore:
                 """
                 INSERT INTO draft_versions (
                     session_id, version_number, artifact_type, source_type, retrieval_version_id,
-                    source_iis_version_id, draft_json, raw_text, summary, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    source_iis_version_id, source_iis_version_number, draft_json, raw_text, summary, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     session.id,
@@ -347,6 +350,7 @@ class SessionStore:
                     source_type,
                     retrieval_version_id,
                     source_iis_version_id,
+                    source_iis_version_number,
                     json.dumps(asdict(draft), ensure_ascii=False),
                     draft.raw_text,
                     draft.summary,
@@ -387,6 +391,7 @@ class SessionStore:
                             "version_number": draft.version,
                             "artifact_type": artifact_type,
                             "source_iis_version_id": source_iis_version_id,
+                            "source_iis_version_number": source_iis_version_number,
                         }
                     ),
                     created_at,
@@ -412,8 +417,8 @@ class SessionStore:
                 """
                 INSERT INTO draft_versions (
                     session_id, version_number, artifact_type, source_type, retrieval_version_id,
-                    source_iis_version_id, draft_json, raw_text, summary, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    source_iis_version_id, source_iis_version_number, draft_json, raw_text, summary, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     session.id,
@@ -422,6 +427,7 @@ class SessionStore:
                     source_type,
                     session.current_retrieval_version_id,
                     action_guide.source_iis_version_id,
+                    action_guide.source_iis_version_number,
                     json.dumps(asdict(action_guide), ensure_ascii=False),
                     action_guide.raw_text,
                     f"Action guide version {action_guide.version}",
@@ -452,6 +458,7 @@ class SessionStore:
                             "version_number": action_guide.version,
                             "artifact_type": "action_guide",
                             "source_iis_version_id": action_guide.source_iis_version_id,
+                            "source_iis_version_number": action_guide.source_iis_version_number,
                         }
                     ),
                     created_at,
@@ -477,7 +484,7 @@ class SessionStore:
             rows = self._connection.execute(
                 """
                 SELECT id, version_number, artifact_type, source_type, retrieval_version_id,
-                       source_iis_version_id, summary, raw_text, created_at
+                       source_iis_version_id, source_iis_version_number, summary, raw_text, created_at
                 FROM draft_versions
                 WHERE session_id = ?
                 ORDER BY id DESC
@@ -492,6 +499,7 @@ class SessionStore:
                 source_type=row["source_type"],
                 retrieval_version_id=row["retrieval_version_id"],
                 source_iis_version_id=row["source_iis_version_id"],
+                source_iis_version_number=row["source_iis_version_number"],
                 summary=row["summary"],
                 raw_text=row["raw_text"],
                 created_at=row["created_at"],
@@ -505,7 +513,8 @@ class SessionStore:
         with self._lock:
             row = self._connection.execute(
                 """
-                SELECT version_number, artifact_type, retrieval_version_id, source_iis_version_id, draft_json
+                SELECT version_number, artifact_type, retrieval_version_id, source_iis_version_id,
+                       source_iis_version_number, draft_json
                 FROM draft_versions
                 WHERE id = ? AND session_id = ?
                 """,
@@ -537,6 +546,7 @@ class SessionStore:
             retrieval_version_id=row["retrieval_version_id"],
             artifact_type=artifact_type,
             source_iis_version_id=row["source_iis_version_id"],
+            source_iis_version_number=row["source_iis_version_number"],
         )
         session.draft = restored_draft
         session.draft_history.append(restored_draft)

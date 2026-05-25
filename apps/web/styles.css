@@ -451,8 +451,8 @@ body {
   padding: 16px;
 }
 
-.action-guide-editor {
-  min-height: 280px;
+.editor.action-guide-editor {
+  min-height: 600px;
 }
 
 .action-guide-surface.is-empty {

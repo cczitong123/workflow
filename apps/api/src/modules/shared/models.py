@@ -87,6 +87,7 @@ class ImplementationActionGuide:
     where_to_change: list[str]
     raw_text: str
     source_iis_version_id: int | None = None
+    source_iis_version_number: int | None = None
 
 
 @dataclass
@@ -97,6 +98,7 @@ class DraftVersionRecord:
     source_type: str
     retrieval_version_id: int | None
     source_iis_version_id: int | None
+    source_iis_version_number: int | None
     summary: str
     raw_text: str
     created_at: str

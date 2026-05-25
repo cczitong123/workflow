@@ -204,8 +204,8 @@ function updateWorkspaceModeUI() {
   generateActionGuideButton.textContent =
     currentActionGuide && actionGuideOutdated ? "Regenerate Action Guide" : "Generate Action Guide";
 
-  if (currentActionGuide && currentActionGuide.source_iis_version_id) {
-    actionGuideMeta.textContent = `Generated from IIS Version ${currentActionGuide.source_iis_version_id}`;
+  if (currentActionGuide && currentActionGuide.source_iis_version_number) {
+    actionGuideMeta.textContent = `Generated from IIS Version ${currentActionGuide.source_iis_version_number}`;
   } else {
     actionGuideMeta.textContent = "";
   }
@@ -476,8 +476,8 @@ function renderVersions() {
       (version.artifact_type === "action_guide" && version.id === currentActionGuideVersionId) ||
       (version.artifact_type !== "action_guide" && version.id === currentDraftVersionId);
     const sourceSuffix =
-      version.artifact_type === "action_guide" && version.source_iis_version_id
-        ? ` • from IIS v${version.source_iis_version_id}`
+      version.artifact_type === "action_guide" && version.source_iis_version_number
+        ? ` • from IIS v${version.source_iis_version_number}`
         : "";
     meta.textContent = `${formatVersionSourceType(version.source_type)} • ${version.created_at}${sourceSuffix}${isCurrent ? " • current" : ""}`;
     info.appendChild(title);

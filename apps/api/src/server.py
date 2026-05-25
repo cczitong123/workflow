@@ -125,6 +125,7 @@ def _action_guide_from_payload(payload: dict, fallback_version: int) -> Implemen
         where_to_change=where_to_change,
         raw_text=raw_text,
         source_iis_version_id=payload.get("source_iis_version_id"),
+        source_iis_version_number=payload.get("source_iis_version_number"),
     )
 
 
@@ -204,6 +205,7 @@ def _sync_manual_action_guide_if_needed(session, payload: dict) -> None:
         return
     updated_action_guide.version = session.action_guide.version + 1
     updated_action_guide.source_iis_version_id = session.action_guide.source_iis_version_id
+    updated_action_guide.source_iis_version_number = session.action_guide.source_iis_version_number
     session.action_guide = updated_action_guide
     session.action_guide_history.append(updated_action_guide)
     version_id = SESSIONS.save_action_guide_version(
@@ -931,6 +933,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     session.evidence,
                     APP_CONFIG.llm_api,
                     source_iis_version_id=session.confirmed_iis_version_id,
+                    source_iis_version_number=session.draft.version,
                 )
                 session.action_guide = action_guide
                 session.action_guide_history.append(action_guide)

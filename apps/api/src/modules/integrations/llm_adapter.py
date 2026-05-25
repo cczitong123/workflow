@@ -88,6 +88,7 @@ def generate_action_guide(
     config: LlmApiConfig,
     *,
     source_iis_version_id: int | None,
+    source_iis_version_number: int | None,
 ) -> ImplementationActionGuide:
     mode = config.mode.lower().strip()
     _log(f"generate_action_guide mode={mode}")
@@ -96,6 +97,7 @@ def generate_action_guide(
             implementation_intent_specification,
             evidence,
             source_iis_version_id=source_iis_version_id,
+            source_iis_version_number=source_iis_version_number,
         )
     if mode == "local":
         return _generate_local_action_guide(
@@ -105,6 +107,7 @@ def generate_action_guide(
             evidence,
             config,
             source_iis_version_id=source_iis_version_id,
+            source_iis_version_number=source_iis_version_number,
         )
     if mode == "remote":
         return _generate_remote_action_guide(
@@ -114,6 +117,7 @@ def generate_action_guide(
             evidence,
             config,
             source_iis_version_id=source_iis_version_id,
+            source_iis_version_number=source_iis_version_number,
         )
     raise NotImplementedError(
         f"LLM mode '{config.mode}' is not implemented yet. "
@@ -221,6 +225,7 @@ def _generate_mock_action_guide(
     evidence: list[EvidenceItem],
     *,
     source_iis_version_id: int | None,
+    source_iis_version_number: int | None,
 ) -> ImplementationActionGuide:
     what_to_do = [
         step.actions[0] if step.actions else step.condition
@@ -234,6 +239,7 @@ def _generate_mock_action_guide(
         where_to_change=where_to_change,
         raw_text=raw_text,
         source_iis_version_id=source_iis_version_id,
+        source_iis_version_number=source_iis_version_number,
     )
 
 
@@ -303,6 +309,7 @@ def _generate_local_action_guide(
     config: LlmApiConfig,
     *,
     source_iis_version_id: int | None,
+    source_iis_version_number: int | None,
 ) -> ImplementationActionGuide:
     raise NotImplementedError(
         "Local LLM mode is selected, but local action-guide generation is not implemented yet."
@@ -338,6 +345,7 @@ def _generate_remote_action_guide(
     config: LlmApiConfig,
     *,
     source_iis_version_id: int | None,
+    source_iis_version_number: int | None,
 ) -> ImplementationActionGuide:
     _log("Rendering implementation_action_guide_system prompt")
     prompt = render_prompt(
@@ -360,7 +368,12 @@ def _generate_remote_action_guide(
     payload = _call_remote_chat(prompt, config)
     _log(f"Implementation action guide response received. chars={len(payload)}")
     data = _parse_json_response(payload)
-    return _action_guide_from_json(data, version=1, source_iis_version_id=source_iis_version_id)
+    return _action_guide_from_json(
+        data,
+        version=1,
+        source_iis_version_id=source_iis_version_id,
+        source_iis_version_number=source_iis_version_number,
+    )
 
 
 def _refine_mock_draft(
@@ -428,6 +441,7 @@ def _refine_mock_action_guide(
         where_to_change=current.where_to_change,
         raw_text=raw_text,
         source_iis_version_id=current.source_iis_version_id,
+        source_iis_version_number=current.source_iis_version_number,
     )
 
 
@@ -489,6 +503,7 @@ def _refine_remote_action_guide(
         data,
         version=current.version + 1,
         source_iis_version_id=current.source_iis_version_id,
+        source_iis_version_number=current.source_iis_version_number,
     )
 
 
@@ -662,6 +677,7 @@ def _action_guide_from_json(
     *,
     version: int,
     source_iis_version_id: int | None,
+    source_iis_version_number: int | None,
 ) -> ImplementationActionGuide:
     what_to_do = [str(item).strip() for item in data.get("what_to_do", []) if str(item).strip()]
     where_to_change = [str(item).strip() for item in data.get("where_to_change", []) if str(item).strip()]
@@ -671,6 +687,7 @@ def _action_guide_from_json(
         where_to_change=where_to_change,
         raw_text=_render_action_guide(what_to_do, where_to_change),
         source_iis_version_id=source_iis_version_id,
+        source_iis_version_number=source_iis_version_number,
     )
 
 
@@ -731,6 +748,7 @@ def _action_guide_to_prompt(action_guide: ImplementationActionGuide) -> dict:
         "what_to_do": action_guide.what_to_do,
         "where_to_change": action_guide.where_to_change,
         "source_iis_version_id": action_guide.source_iis_version_id,
+        "source_iis_version_number": action_guide.source_iis_version_number,
     }
 
 
