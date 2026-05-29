@@ -9,10 +9,10 @@ from prompt_loader import load_fewshot_examples, render_prompt
 from modules.shared.models import (
     EvidenceItem,
     FileChange,
-    ImplementationActionGuide,
     OpenQuestion,
     ParsedWhatToDo,
     RetrievalIntent,
+    SoftwareRequirementsDraft,
     Step,
     WhatToDoDraft,
 )
@@ -80,41 +80,34 @@ def refine_draft(
     )
 
 
-def generate_action_guide(
+def generate_software_requirements(
     description: str,
     implementation_intent_specification: WhatToDoDraft,
-    retrieval_intent: RetrievalIntent,
-    evidence: list[EvidenceItem],
     config: LlmApiConfig,
     *,
     source_iis_version_id: int | None,
     source_iis_version_number: int | None,
-) -> ImplementationActionGuide:
+) -> SoftwareRequirementsDraft:
     mode = config.mode.lower().strip()
-    _log(f"generate_action_guide mode={mode}")
+    _log(f"generate_software_requirements mode={mode}")
     if mode == "mock":
-        return _generate_mock_action_guide(
+        return _generate_mock_software_requirements(
             implementation_intent_specification,
-            evidence,
             source_iis_version_id=source_iis_version_id,
             source_iis_version_number=source_iis_version_number,
         )
     if mode == "local":
-        return _generate_local_action_guide(
+        return _generate_local_software_requirements(
             description,
             implementation_intent_specification,
-            retrieval_intent,
-            evidence,
             config,
             source_iis_version_id=source_iis_version_id,
             source_iis_version_number=source_iis_version_number,
         )
     if mode == "remote":
-        return _generate_remote_action_guide(
+        return _generate_remote_software_requirements(
             description,
             implementation_intent_specification,
-            retrieval_intent,
-            evidence,
             config,
             source_iis_version_id=source_iis_version_id,
             source_iis_version_number=source_iis_version_number,
@@ -125,20 +118,20 @@ def generate_action_guide(
     )
 
 
-def refine_action_guide(
-    current: ImplementationActionGuide,
+def refine_software_requirements(
+    current: SoftwareRequirementsDraft,
     user_message: str,
     answered_questions: list[dict[str, str]],
     config: LlmApiConfig,
-) -> ImplementationActionGuide:
+) -> SoftwareRequirementsDraft:
     mode = config.mode.lower().strip()
-    _log(f"refine_action_guide mode={mode}")
+    _log(f"refine_software_requirements mode={mode}")
     if mode == "mock":
-        return _refine_mock_action_guide(current, user_message, answered_questions)
+        return _refine_mock_software_requirements(current, user_message, answered_questions)
     if mode == "local":
-        return _refine_local_action_guide(current, user_message, answered_questions, config)
+        return _refine_local_software_requirements(current, user_message, answered_questions, config)
     if mode == "remote":
-        return _refine_remote_action_guide(current, user_message, answered_questions, config)
+        return _refine_remote_software_requirements(current, user_message, answered_questions, config)
     raise NotImplementedError(
         f"LLM mode '{config.mode}' is not implemented yet. "
         "Update modules/integrations/llm_adapter.py."
@@ -220,23 +213,30 @@ def _generate_mock_draft(
     )
 
 
-def _generate_mock_action_guide(
+def _generate_mock_software_requirements(
     implementation_intent_specification: WhatToDoDraft,
-    evidence: list[EvidenceItem],
     *,
     source_iis_version_id: int | None,
     source_iis_version_number: int | None,
-) -> ImplementationActionGuide:
-    what_to_do = [
-        step.actions[0] if step.actions else step.condition
-        for step in implementation_intent_specification.steps
+) -> SoftwareRequirementsDraft:
+    requirements = []
+    for index, step in enumerate(implementation_intent_specification.steps, start=1):
+        if step.actions:
+            requirements.extend(
+                f"SR-{len(requirements) + 1}: The system shall {action[0].lower() + action[1:] if action else action}."
+                for action in step.actions
+            )
+        elif step.condition:
+            requirements.append(f"SR-{len(requirements) + 1}: The system shall satisfy the condition '{step.condition}'.")
+    traceability_summary = [
+        f"SR-{index}: Derived from IIS step {min(index, len(implementation_intent_specification.steps))}."
+        for index in range(1, len(requirements) + 1)
     ]
-    where_to_change = [item.path for item in evidence[:8]]
-    raw_text = _render_action_guide(what_to_do, where_to_change)
-    return ImplementationActionGuide(
+    raw_text = _render_software_requirements(requirements, traceability_summary)
+    return SoftwareRequirementsDraft(
         version=1,
-        what_to_do=what_to_do,
-        where_to_change=where_to_change,
+        requirements=requirements,
+        traceability_summary=traceability_summary,
         raw_text=raw_text,
         source_iis_version_id=source_iis_version_id,
         source_iis_version_number=source_iis_version_number,
@@ -301,18 +301,16 @@ def _generate_local_draft(
     )
 
 
-def _generate_local_action_guide(
+def _generate_local_software_requirements(
     description: str,
     implementation_intent_specification: WhatToDoDraft,
-    retrieval_intent: RetrievalIntent,
-    evidence: list[EvidenceItem],
     config: LlmApiConfig,
     *,
     source_iis_version_id: int | None,
     source_iis_version_number: int | None,
-) -> ImplementationActionGuide:
+) -> SoftwareRequirementsDraft:
     raise NotImplementedError(
-        "Local LLM mode is selected, but local action-guide generation is not implemented yet."
+        "Local LLM mode is selected, but local software-requirements generation is not implemented yet."
     )
 
 
@@ -337,38 +335,30 @@ def _generate_remote_draft(
     return _draft_from_json(data, version=1)
 
 
-def _generate_remote_action_guide(
+def _generate_remote_software_requirements(
     description: str,
     implementation_intent_specification: WhatToDoDraft,
-    retrieval_intent: RetrievalIntent,
-    evidence: list[EvidenceItem],
     config: LlmApiConfig,
     *,
     source_iis_version_id: int | None,
     source_iis_version_number: int | None,
-) -> ImplementationActionGuide:
-    _log("Rendering implementation_action_guide_system prompt")
+) -> SoftwareRequirementsDraft:
+    _log("Rendering software_requirements_system prompt")
     prompt = render_prompt(
-        "implementation_action_guide_system",
+        "software_requirements_system",
         description=description,
         implementation_intent_specification=json.dumps(
             _draft_to_prompt(implementation_intent_specification),
             ensure_ascii=False,
             indent=2,
         ),
-        retrieval_intent=json.dumps(
-            _retrieval_intent_to_prompt(retrieval_intent),
-            ensure_ascii=False,
-            indent=2,
-        ),
-        evidence=json.dumps([_evidence_to_prompt(item) for item in evidence], ensure_ascii=False, indent=2),
-        fewshot=json.dumps(load_fewshot_examples("implementation_action_guide_fewshot"), ensure_ascii=False, indent=2),
+        fewshot=json.dumps(load_fewshot_examples("software_requirements_fewshot"), ensure_ascii=False, indent=2),
     )
-    _log(f"Implementation action guide prompt rendered. chars={len(prompt)}")
+    _log(f"Software requirements prompt rendered. chars={len(prompt)}")
     payload = _call_remote_chat(prompt, config)
-    _log(f"Implementation action guide response received. chars={len(payload)}")
+    _log(f"Software requirements response received. chars={len(payload)}")
     data = _parse_json_response(payload)
-    return _action_guide_from_json(
+    return _software_requirements_from_json(
         data,
         version=1,
         source_iis_version_id=source_iis_version_id,
@@ -420,11 +410,11 @@ def _refine_local_draft(
     )
 
 
-def _refine_mock_action_guide(
-    current: ImplementationActionGuide,
+def _refine_mock_software_requirements(
+    current: SoftwareRequirementsDraft,
     user_message: str,
     answered_questions: list[dict[str, str]],
-) -> ImplementationActionGuide:
+) -> SoftwareRequirementsDraft:
     additions = []
     if user_message.strip():
         additions.append(user_message.strip())
@@ -433,26 +423,29 @@ def _refine_mock_action_guide(
         for item in answered_questions
         if item.get("id") and item.get("answer")
     )
-    what_to_do = list(current.what_to_do) + additions
-    raw_text = _render_action_guide(what_to_do, current.where_to_change)
-    return ImplementationActionGuide(
+    requirements = list(current.requirements) + [
+        f"SR-{len(current.requirements) + index}: {text}"
+        for index, text in enumerate(additions, start=1)
+    ]
+    raw_text = _render_software_requirements(requirements, current.traceability_summary)
+    return SoftwareRequirementsDraft(
         version=current.version + 1,
-        what_to_do=what_to_do,
-        where_to_change=current.where_to_change,
+        requirements=requirements,
+        traceability_summary=current.traceability_summary,
         raw_text=raw_text,
         source_iis_version_id=current.source_iis_version_id,
         source_iis_version_number=current.source_iis_version_number,
     )
 
 
-def _refine_local_action_guide(
-    current: ImplementationActionGuide,
+def _refine_local_software_requirements(
+    current: SoftwareRequirementsDraft,
     user_message: str,
     answered_questions: list[dict[str, str]],
     config: LlmApiConfig,
-) -> ImplementationActionGuide:
+) -> SoftwareRequirementsDraft:
     raise NotImplementedError(
-        "Local LLM mode is selected, but local action-guide refine is not implemented yet."
+        "Local LLM mode is selected, but local software-requirements refine is not implemented yet."
     )
 
 
@@ -477,29 +470,29 @@ def _refine_remote_draft(
     return _draft_from_json(data, version=current.version + 1)
 
 
-def _refine_remote_action_guide(
-    current: ImplementationActionGuide,
+def _refine_remote_software_requirements(
+    current: SoftwareRequirementsDraft,
     user_message: str,
     answered_questions: list[dict[str, str]],
     config: LlmApiConfig,
-) -> ImplementationActionGuide:
-    _log("Rendering refine_implementation_action_guide_system prompt")
+) -> SoftwareRequirementsDraft:
+    _log("Rendering refine_software_requirements_system prompt")
     prompt = render_prompt(
-        "refine_implementation_action_guide_system",
-        current_action_guide=json.dumps(
-            _action_guide_to_prompt(current),
+        "refine_software_requirements_system",
+        current_software_requirements=json.dumps(
+            _software_requirements_to_prompt(current),
             ensure_ascii=False,
             indent=2,
         ),
         user_message=user_message,
         answered_questions=json.dumps(answered_questions, ensure_ascii=False, indent=2),
-        fewshot=json.dumps(load_fewshot_examples("implementation_action_guide_fewshot"), ensure_ascii=False, indent=2),
+        fewshot=json.dumps(load_fewshot_examples("software_requirements_fewshot"), ensure_ascii=False, indent=2),
     )
-    _log(f"Action guide refine prompt rendered. chars={len(prompt)}")
+    _log(f"Software requirements refine prompt rendered. chars={len(prompt)}")
     payload = _call_remote_chat(prompt, config)
-    _log(f"Action guide refine response received. chars={len(payload)}")
+    _log(f"Software requirements refine response received. chars={len(payload)}")
     data = _parse_json_response(payload)
-    return _action_guide_from_json(
+    return _software_requirements_from_json(
         data,
         version=current.version + 1,
         source_iis_version_id=current.source_iis_version_id,
@@ -508,14 +501,15 @@ def _refine_remote_action_guide(
 
 
 def _render_draft(steps: list[Step], files_to_change: list[FileChange]) -> str:
-    lines = ["**What to do:**", ""]
-    for index, step in enumerate(steps, start=1):
-        lines.append(f"{index}. **{step.condition}:**")
+    lines = ["## What to do", ""]
+    for step in steps:
+        if step.condition:
+            lines.append(f"- {step.condition}")
         for action in step.actions:
-            lines.append(f"   - {action}")
-    lines.extend(["", "**Files to change:**", ""])
+            lines.append(f"  - {action}" if step.condition else f"- {action}")
+    lines.extend(["", "## Where to change", ""])
     for item in files_to_change:
-        lines.append(f"- `{item.path}` — {item.reason}")
+        lines.append(f"- `{item.path}`: {item.reason}")
     return "\n".join(lines)
 
 
@@ -672,20 +666,41 @@ def _draft_from_json(data: dict, version: int) -> WhatToDoDraft:
     )
 
 
-def _action_guide_from_json(
+def _software_requirements_from_json(
     data: dict,
     *,
     version: int,
     source_iis_version_id: int | None,
     source_iis_version_number: int | None,
-) -> ImplementationActionGuide:
-    what_to_do = [str(item).strip() for item in data.get("what_to_do", []) if str(item).strip()]
-    where_to_change = [str(item).strip() for item in data.get("where_to_change", []) if str(item).strip()]
-    return ImplementationActionGuide(
+) -> SoftwareRequirementsDraft:
+    requirements = []
+    for item in data.get("software_requirements", []):
+        if isinstance(item, dict):
+            req_id = str(item.get("id", "")).strip()
+            text = str(item.get("text", "")).strip()
+            if text:
+                requirements.append(f"{req_id}: {text}" if req_id else text)
+        else:
+            text = str(item).strip()
+            if text:
+                requirements.append(text)
+    traceability_summary = []
+    for item in data.get("traceability_summary", []):
+        if isinstance(item, dict):
+            req_id = str(item.get("requirement_id", "")).strip()
+            mappings = [str(entry).strip() for entry in item.get("maps_to", []) if str(entry).strip()]
+            if mappings:
+                prefix = f"{req_id}: " if req_id else ""
+                traceability_summary.append(prefix + "; ".join(mappings))
+        else:
+            text = str(item).strip()
+            if text:
+                traceability_summary.append(text)
+    return SoftwareRequirementsDraft(
         version=version,
-        what_to_do=what_to_do,
-        where_to_change=where_to_change,
-        raw_text=_render_action_guide(what_to_do, where_to_change),
+        requirements=requirements,
+        traceability_summary=traceability_summary,
+        raw_text=_render_software_requirements(requirements, traceability_summary),
         source_iis_version_id=source_iis_version_id,
         source_iis_version_number=source_iis_version_number,
     )
@@ -742,21 +757,21 @@ def _draft_to_prompt(draft: WhatToDoDraft) -> dict:
     }
 
 
-def _action_guide_to_prompt(action_guide: ImplementationActionGuide) -> dict:
+def _software_requirements_to_prompt(software_requirements: SoftwareRequirementsDraft) -> dict:
     return {
-        "version": action_guide.version,
-        "what_to_do": action_guide.what_to_do,
-        "where_to_change": action_guide.where_to_change,
-        "source_iis_version_id": action_guide.source_iis_version_id,
-        "source_iis_version_number": action_guide.source_iis_version_number,
+        "version": software_requirements.version,
+        "software_requirements": software_requirements.requirements,
+        "traceability_summary": software_requirements.traceability_summary,
+        "source_iis_version_id": software_requirements.source_iis_version_id,
+        "source_iis_version_number": software_requirements.source_iis_version_number,
     }
 
 
-def _render_action_guide(what_to_do: list[str], where_to_change: list[str]) -> str:
-    lines = ["## What to do", ""]
-    for item in what_to_do:
+def _render_software_requirements(requirements: list[str], traceability_summary: list[str]) -> str:
+    lines = ["## Software Requirements", ""]
+    for item in requirements:
         lines.append(f"- {item}")
-    lines.extend(["", "## Where to change", ""])
-    for item in where_to_change:
+    lines.extend(["", "## Traceability Summary", ""])
+    for item in traceability_summary:
         lines.append(f"- {item}")
     return "\n".join(lines)

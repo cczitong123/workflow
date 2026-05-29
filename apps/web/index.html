@@ -10,12 +10,12 @@
     <header class="topbar">
       <div>
         <h1>Epic Implementation Workbench</h1>
-        <p>Offline MVP for description -> evidence -> specification -> action guide.</p>
+        <p>Offline MVP for description -> evidence -> implementation specification -> software requirements.</p>
       </div>
       <div class="controls">
         <div id="currentEpicBadge" class="current-epic-badge">Current Epic: None selected</div>
         <button id="jiraImportButton" class="button-secondary">Import from Jira</button>
-        <button id="loadButton" class="button-primary">Generate Draft</button>
+        <button id="loadButton" class="button-primary">Generate IIS</button>
       </div>
     </header>
 
@@ -77,23 +77,24 @@
               <button id="confirmIisButton" class="button-primary">Confirm IIS</button>
               <button id="reopenIisButton" class="button-secondary hidden">Reopen IIS</button>
             </div>
-            <button id="generateActionGuideButton" class="button-primary">Generate Action Guide</button>
+            <button id="generateActionGuideButton" class="button-primary">Generate Software Requirements</button>
           </div>
         </div>
         <div class="artifact-block">
           <div class="artifact-header">
             <div>
-              <h3>Implementation Action Guide</h3>
+              <h3>Software Requirements</h3>
               <p class="subtle" id="actionGuideMeta"></p>
             </div>
           </div>
           <div id="actionGuideEmptyState" class="editor-state action-guide-empty-state">
-            Confirm the current Implementation Intent Specification, then use Generate Action Guide to create the first guide draft.
+            Confirm the current Implementation Intent Specification, then use Generate Software Requirements to create the first requirement draft.
           </div>
           <div id="actionGuideOutdated" class="outdated-banner hidden">
-            Current IIS has changed. Reconfirm to regenerate this guide.
+            Current IIS has changed. Reconfirm to regenerate the software requirements.
           </div>
           <div id="actionGuideSurface" class="surface-panel display-surface action-guide-surface is-empty">
+            <div id="softwareRequirementsCards" class="software-requirements-cards hidden"></div>
             <textarea id="actionGuideEditor" class="editor action-guide-editor"></textarea>
           </div>
         </div>
@@ -120,7 +121,7 @@
           <details class="info-popover">
             <summary>?</summary>
             <div class="info-popover-body">
-              Refinement targets the currently active artifact. In IIS mode it updates the Implementation Intent Specification. In Action Guide mode it updates the Implementation Action Guide.
+              Refinement targets the currently active artifact. In IIS mode it updates the Implementation Intent Specification. In Software Requirements mode it updates the Software Requirements draft.
             </div>
           </details>
         </div>

@@ -15,17 +15,17 @@ from modules.epics.repository import EpicRepository
 from modules.integrations.code_rag_adapter import retrieve_code_evidence
 from modules.integrations.llm_adapter import (
     build_retrieval_intent,
-    generate_action_guide,
     generate_draft,
-    refine_action_guide,
+    generate_software_requirements,
     refine_draft,
+    refine_software_requirements,
 )
 from modules.sessions.store import SessionStore
 from modules.shared.models import (
     FileChange,
-    ImplementationActionGuide,
     OpenQuestion,
     RetrievalIntent,
+    SoftwareRequirementsDraft,
     Step,
     WhatToDoDraft,
     to_dict,
@@ -109,41 +109,51 @@ def _draft_from_payload(payload: dict, fallback_version: int) -> WhatToDoDraft:
     )
 
 
-def _action_guide_from_payload(payload: dict, fallback_version: int) -> ImplementationActionGuide:
+def _software_requirements_from_payload(payload: dict, fallback_version: int) -> SoftwareRequirementsDraft:
     raw_text = str(payload.get("raw_text", "")).strip()
-    what_to_do = [str(item).strip() for item in payload.get("what_to_do", []) if str(item).strip()]
-    where_to_change = [str(item).strip() for item in payload.get("where_to_change", []) if str(item).strip()]
-    if raw_text and (not what_to_do and not where_to_change):
-        what_to_do, where_to_change = _parse_action_guide_raw_text(raw_text)
+    requirements = [str(item).strip() for item in payload.get("requirements", []) if str(item).strip()]
+    traceability_summary = [
+        str(item).strip() for item in payload.get("traceability_summary", []) if str(item).strip()
+    ]
+    if raw_text and (not requirements and not traceability_summary):
+        requirements, traceability_summary = _parse_software_requirements_raw_text(raw_text)
     if not raw_text:
         raw_text = "\n".join(
-            ["## What to do", "", *[f"- {item}" for item in what_to_do], "", "## Where to change", "", *[f"- {item}" for item in where_to_change]]
+            [
+                "## Software Requirements",
+                "",
+                *[f"- {item}" for item in requirements],
+                "",
+                "## Traceability Summary",
+                "",
+                *[f"- {item}" for item in traceability_summary],
+            ]
         )
-    return ImplementationActionGuide(
+    return SoftwareRequirementsDraft(
         version=int(payload.get("version", fallback_version)),
-        what_to_do=what_to_do,
-        where_to_change=where_to_change,
+        requirements=requirements,
+        traceability_summary=traceability_summary,
         raw_text=raw_text,
         source_iis_version_id=payload.get("source_iis_version_id"),
         source_iis_version_number=payload.get("source_iis_version_number"),
     )
 
 
-def _parse_action_guide_raw_text(raw_text: str) -> tuple[list[str], list[str]]:
-    what_to_do: list[str] = []
-    where_to_change: list[str] = []
-    current_section = "what_to_do"
+def _parse_software_requirements_raw_text(raw_text: str) -> tuple[list[str], list[str]]:
+    requirements: list[str] = []
+    traceability_summary: list[str] = []
+    current_section = "requirements"
 
     for raw_line in raw_text.splitlines():
         line = raw_line.strip()
         if not line:
             continue
         lower_line = line.lower()
-        if "where to change" in lower_line:
-            current_section = "where_to_change"
+        if "traceability summary" in lower_line:
+            current_section = "traceability_summary"
             continue
-        if "what to do" in lower_line:
-            current_section = "what_to_do"
+        if "software requirements" in lower_line:
+            current_section = "requirements"
             continue
 
         item = line
@@ -156,12 +166,12 @@ def _parse_action_guide_raw_text(raw_text: str) -> tuple[list[str], list[str]]:
 
         if not item:
             continue
-        if current_section == "where_to_change":
-            where_to_change.append(item)
+        if current_section == "traceability_summary":
+            traceability_summary.append(item)
         else:
-            what_to_do.append(item)
+            requirements.append(item)
 
-    return what_to_do, where_to_change
+    return requirements, traceability_summary
 
 
 def _sync_manual_draft_if_needed(session, payload: dict) -> None:
@@ -191,53 +201,53 @@ def _sync_manual_draft_if_needed(session, payload: dict) -> None:
     log_event("DRAFT", f"Session {session.id} saved manual editor changes as version_id={draft_version_id}")
 
 
-def _sync_manual_action_guide_if_needed(session, payload: dict) -> None:
-    if SESSIONS is None or session.action_guide is None:
+def _sync_manual_software_requirements_if_needed(session, payload: dict) -> None:
+    if SESSIONS is None or session.software_requirements is None:
         return
-    current_action_guide_payload = payload.get("currentActionGuide")
-    if not isinstance(current_action_guide_payload, dict):
+    current_software_requirements_payload = payload.get("currentSoftwareRequirements")
+    if not isinstance(current_software_requirements_payload, dict):
         return
-    updated_action_guide = _action_guide_from_payload(
-        current_action_guide_payload,
-        session.action_guide.version,
+    updated_software_requirements = _software_requirements_from_payload(
+        current_software_requirements_payload,
+        session.software_requirements.version,
     )
-    if updated_action_guide.raw_text == session.action_guide.raw_text:
+    if updated_software_requirements.raw_text == session.software_requirements.raw_text:
         return
-    updated_action_guide.version = session.action_guide.version + 1
-    updated_action_guide.source_iis_version_id = session.action_guide.source_iis_version_id
-    updated_action_guide.source_iis_version_number = session.action_guide.source_iis_version_number
-    session.action_guide = updated_action_guide
-    session.action_guide_history.append(updated_action_guide)
-    version_id = SESSIONS.save_action_guide_version(
+    updated_software_requirements.version = session.software_requirements.version + 1
+    updated_software_requirements.source_iis_version_id = session.software_requirements.source_iis_version_id
+    updated_software_requirements.source_iis_version_number = session.software_requirements.source_iis_version_number
+    session.software_requirements = updated_software_requirements
+    session.software_requirements_history.append(updated_software_requirements)
+    version_id = SESSIONS.save_software_requirements_version(
         session,
-        updated_action_guide,
+        updated_software_requirements,
         source_type="manual_edit",
     )
     SESSIONS.save_user_event(
         session.id,
         "manual_edit",
         "user",
-        {"actionGuideVersionId": version_id, "artifactType": "action_guide"},
+        {"softwareRequirementsVersionId": version_id, "artifactType": "software_requirements"},
     )
-    log_event("GUIDE", f"Session {session.id} saved manual action guide changes as version_id={version_id}")
+    log_event("SQ", f"Session {session.id} saved manual software requirements changes as version_id={version_id}")
 
 
-def _render_action_guide_markdown(guide: ImplementationActionGuide | None) -> str:
-    if guide is None:
+def _render_software_requirements_markdown(software_requirements: SoftwareRequirementsDraft | None) -> str:
+    if software_requirements is None:
         return ""
-    lines = ["## What to do", ""]
-    lines.extend(f"- {item}" for item in guide.what_to_do)
-    lines.extend(["", "## Where to change", ""])
-    lines.extend(f"- {item}" for item in guide.where_to_change)
+    lines = ["## Software Requirements", ""]
+    lines.extend(f"- {item}" for item in software_requirements.requirements)
+    lines.extend(["", "## Traceability Summary", ""])
+    lines.extend(f"- {item}" for item in software_requirements.traceability_summary)
     return "\n".join(lines)
 
 
-def _mark_action_guide_outdated_if_needed(session) -> None:
+def _mark_software_requirements_outdated_if_needed(session) -> None:
     if session.confirmed_iis_version_id is None:
         return
     if session.current_draft_version_id is None:
         return
-    session.action_guide_outdated = session.current_draft_version_id != session.confirmed_iis_version_id
+    session.software_requirements_outdated = session.current_draft_version_id != session.confirmed_iis_version_id
 
 
 def _serialize_epic_record(record) -> dict:
@@ -295,7 +305,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 {
                     "sessionId": session.id,
                     "currentDraftVersionId": session.current_draft_version_id,
-                    "currentActionGuideVersionId": session.current_action_guide_version_id,
+                    "currentSoftwareRequirementsVersionId": session.current_software_requirements_version_id,
                     "versions": to_dict(SESSIONS.list_draft_versions(session_id)),
                 }
             )
@@ -311,15 +321,15 @@ class AppHandler(BaseHTTPRequestHandler):
                     "currentPhase": session.current_phase,
                     "currentMessage": session.current_message,
                     "mode": session.mode,
-                    "actionGuideOutdated": session.action_guide_outdated,
+                    "softwareRequirementsOutdated": session.software_requirements_outdated,
                     "confirmedIisVersionId": session.confirmed_iis_version_id,
                     "currentDraftVersionId": session.current_draft_version_id,
-                    "currentActionGuideVersionId": session.current_action_guide_version_id,
+                    "currentSoftwareRequirementsVersionId": session.current_software_requirements_version_id,
                     "currentRetrievalVersionId": session.current_retrieval_version_id,
                     "retrievalIntent": to_dict(session.retrieval_intent) if session.retrieval_intent else None,
                     "evidence": to_dict(session.evidence),
                     "draft": to_dict(session.draft) if session.draft else None,
-                    "actionGuide": to_dict(session.action_guide) if session.action_guide else None,
+                    "softwareRequirements": to_dict(session.software_requirements) if session.software_requirements else None,
                 }
             )
             return
@@ -507,7 +517,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 SESSIONS.update_session_metadata(
                     session,
                     mode="iis_mode",
-                    action_guide_outdated=False,
+                    software_requirements_outdated=False,
                 )
                 SESSIONS.update_runtime_state(
                     session,
@@ -527,9 +537,9 @@ class AppHandler(BaseHTTPRequestHandler):
                         "evidence": to_dict(evidence),
                         "referenceSamples": to_dict(references),
                         "draft": to_dict(draft),
-                        "actionGuide": None,
+                        "softwareRequirements": None,
                         "mode": session.mode,
-                        "actionGuideOutdated": session.action_guide_outdated,
+                        "softwareRequirementsOutdated": session.software_requirements_outdated,
                         "confirmedIisVersionId": session.confirmed_iis_version_id,
                         "groundTruth": to_dict(ground_truth),
                     }
@@ -552,40 +562,42 @@ class AppHandler(BaseHTTPRequestHandler):
                     {"userMessage": user_message, "answeredQuestions": answered},
                 )
 
-                if session.mode == "action_guide_mode":
-                    if session.action_guide is None:
-                        self._json({"error": "Implementation Action Guide not generated yet."}, status=HTTPStatus.BAD_REQUEST)
+                if session.mode == "software_requirements_mode":
+                    if session.software_requirements is None:
+                        self._json({"error": "Software Requirements not generated yet."}, status=HTTPStatus.BAD_REQUEST)
                         return
-                    _sync_manual_action_guide_if_needed(session, payload)
+                    _sync_manual_software_requirements_if_needed(session, payload)
                     SESSIONS.update_runtime_state(
                         session,
                         status="refining",
-                        phase="refining_action_guide",
-                        message="Refining Implementation Action Guide...",
+                        phase="refining_software_requirements",
+                        message="Refining Software Requirements...",
                     )
-                    action_guide = refine_action_guide(session.action_guide, user_message, answered, APP_CONFIG.llm_api)
-                    session.action_guide = action_guide
-                    session.action_guide_history.append(action_guide)
-                    SESSIONS.save_action_guide_version(
+                    software_requirements = refine_software_requirements(
+                        session.software_requirements, user_message, answered, APP_CONFIG.llm_api
+                    )
+                    session.software_requirements = software_requirements
+                    session.software_requirements_history.append(software_requirements)
+                    SESSIONS.save_software_requirements_version(
                         session,
-                        action_guide,
+                        software_requirements,
                         source_type="refine",
                     )
                     SESSIONS.update_runtime_state(
                         session,
                         status="generated",
                         phase="done",
-                        message="Implementation Action Guide refined.",
+                        message="Software Requirements refined.",
                     )
                     log_event(
                         "REFINE",
-                        f"Session {session_id} action guide refine completed. version={action_guide.version}",
+                        f"Session {session_id} software requirements refine completed. version={software_requirements.version}",
                     )
                     self._json(
                         {
-                            "actionGuide": to_dict(action_guide),
+                            "softwareRequirements": to_dict(software_requirements),
                             "mode": session.mode,
-                            "actionGuideOutdated": session.action_guide_outdated,
+                            "softwareRequirementsOutdated": session.software_requirements_outdated,
                         }
                     )
                     return
@@ -609,11 +621,11 @@ class AppHandler(BaseHTTPRequestHandler):
                     source_type="refine",
                     retrieval_version_id=session.current_retrieval_version_id,
                 )
-                _mark_action_guide_outdated_if_needed(session)
+                _mark_software_requirements_outdated_if_needed(session)
                 SESSIONS.update_session_metadata(
                     session,
                     mode="iis_mode",
-                    action_guide_outdated=session.action_guide_outdated,
+                    software_requirements_outdated=session.software_requirements_outdated,
                 )
                 SESSIONS.update_runtime_state(
                     session,
@@ -626,7 +638,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     {
                         "draft": to_dict(draft),
                         "mode": session.mode,
-                        "actionGuideOutdated": session.action_guide_outdated,
+                        "softwareRequirementsOutdated": session.software_requirements_outdated,
                         "diffSummary": [
                             "Appended reviewer guidance as an extra action block.",
                             "Marked answered questions and preserved unresolved ones.",
@@ -639,7 +651,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 session_id = parsed.path.split("/")[-2]
                 session = SESSIONS.get(session_id)
                 log_event("RERUN", f"Session {session_id} retrieval rerun started")
-                if session.mode == "action_guide_mode":
+                if session.mode == "software_requirements_mode":
                     self._json(
                         {"error": "Reopen the Implementation Intent Specification before rerunning retrieval."},
                         status=HTTPStatus.BAD_REQUEST,
@@ -729,11 +741,11 @@ class AppHandler(BaseHTTPRequestHandler):
                     source_type="rerun_retrieval",
                     retrieval_version_id=retrieval_version_id,
                 )
-                _mark_action_guide_outdated_if_needed(session)
+                _mark_software_requirements_outdated_if_needed(session)
                 SESSIONS.update_session_metadata(
                     session,
                     mode="iis_mode",
-                    action_guide_outdated=session.action_guide_outdated,
+                    software_requirements_outdated=session.software_requirements_outdated,
                 )
                 SESSIONS.update_runtime_state(
                     session,
@@ -746,7 +758,7 @@ class AppHandler(BaseHTTPRequestHandler):
                         "retrievalIntent": to_dict(intent),
                         "evidence": to_dict(evidence),
                         "draft": to_dict(draft),
-                        "actionGuideOutdated": session.action_guide_outdated,
+                        "softwareRequirementsOutdated": session.software_requirements_outdated,
                     }
                 )
                 return
@@ -764,25 +776,25 @@ class AppHandler(BaseHTTPRequestHandler):
                     message="Restoring selected version...",
                 )
                 restored_artifact, new_version_id, artifact_type = SESSIONS.restore_draft_version(session, version_id)
-                if artifact_type == "action_guide":
-                    session.action_guide = restored_artifact
+                if artifact_type == "software_requirements":
+                    session.software_requirements = restored_artifact
                     SESSIONS.update_session_metadata(
                         session,
-                        mode="action_guide_mode",
-                        current_action_guide_version_id=new_version_id,
-                        action_guide_outdated=(
+                        mode="software_requirements_mode",
+                        current_software_requirements_version_id=new_version_id,
+                        software_requirements_outdated=(
                             session.confirmed_iis_version_id is not None
                             and restored_artifact.source_iis_version_id != session.confirmed_iis_version_id
                         ),
                     )
                 else:
                     session.draft = restored_artifact
-                    _mark_action_guide_outdated_if_needed(session)
+                    _mark_software_requirements_outdated_if_needed(session)
                     SESSIONS.update_session_metadata(
                         session,
                         mode="iis_mode",
                         current_draft_version_id=new_version_id,
-                        action_guide_outdated=session.action_guide_outdated,
+                        software_requirements_outdated=session.software_requirements_outdated,
                     )
                 SESSIONS.save_user_event(
                     session.id,
@@ -803,11 +815,11 @@ class AppHandler(BaseHTTPRequestHandler):
                 self._json(
                     {
                         "draft": to_dict(session.draft) if session.draft else None,
-                        "actionGuide": to_dict(session.action_guide) if session.action_guide else None,
+                        "softwareRequirements": to_dict(session.software_requirements) if session.software_requirements else None,
                         "currentDraftVersionId": session.current_draft_version_id,
-                        "currentActionGuideVersionId": session.current_action_guide_version_id,
+                        "currentSoftwareRequirementsVersionId": session.current_software_requirements_version_id,
                         "mode": session.mode,
-                        "actionGuideOutdated": session.action_guide_outdated,
+                        "softwareRequirementsOutdated": session.software_requirements_outdated,
                     }
                 )
                 return
@@ -865,15 +877,15 @@ class AppHandler(BaseHTTPRequestHandler):
                         status=HTTPStatus.BAD_REQUEST,
                     )
                     return
-                action_guide_outdated = bool(
-                    session.action_guide
-                    and session.action_guide.source_iis_version_id != confirmed_iis_version_id
+                software_requirements_outdated = bool(
+                    session.software_requirements
+                    and session.software_requirements.source_iis_version_id != confirmed_iis_version_id
                 )
                 SESSIONS.update_session_metadata(
                     session,
-                    mode="action_guide_mode",
+                    mode="software_requirements_mode",
                     confirmed_iis_version_id=confirmed_iis_version_id,
-                    action_guide_outdated=action_guide_outdated,
+                    software_requirements_outdated=software_requirements_outdated,
                 )
                 SESSIONS.save_user_event(
                     session.id,
@@ -892,16 +904,16 @@ class AppHandler(BaseHTTPRequestHandler):
                 self._json(
                     {
                         "draft": to_dict(session.draft),
-                        "actionGuide": to_dict(session.action_guide) if session.action_guide else None,
+                        "softwareRequirements": to_dict(session.software_requirements) if session.software_requirements else None,
                         "mode": session.mode,
                         "confirmedIisVersionId": session.confirmed_iis_version_id,
-                        "currentActionGuideVersionId": session.current_action_guide_version_id,
-                        "actionGuideOutdated": session.action_guide_outdated,
+                        "currentSoftwareRequirementsVersionId": session.current_software_requirements_version_id,
+                        "softwareRequirementsOutdated": session.software_requirements_outdated,
                     }
                 )
                 return
 
-            if parsed.path.endswith("/generate-action-guide"):
+            if parsed.path.endswith("/generate-software-requirements"):
                 session_id = parsed.path.split("/")[-2]
                 session = SESSIONS.get(session_id)
                 if session.draft is None or session.retrieval_intent is None:
@@ -915,62 +927,60 @@ class AppHandler(BaseHTTPRequestHandler):
                     return
                 if session.confirmed_iis_version_id is None or session.current_draft_version_id != session.confirmed_iis_version_id:
                     self._json(
-                        {"error": "Confirm the current Implementation Intent Specification before generating the action guide."},
+                        {"error": "Confirm the current Implementation Intent Specification before generating software requirements."},
                         status=HTTPStatus.BAD_REQUEST,
                     )
                     return
-                _sync_manual_action_guide_if_needed(session, payload)
+                _sync_manual_software_requirements_if_needed(session, payload)
                 SESSIONS.update_runtime_state(
                     session,
                     status="confirming",
-                    phase="generating_action_guide",
-                    message="Generating Implementation Action Guide...",
+                    phase="generating_software_requirements",
+                    message="Generating Software Requirements...",
                 )
-                action_guide = generate_action_guide(
+                software_requirements = generate_software_requirements(
                     session.input_description,
                     session.draft,
-                    session.retrieval_intent,
-                    session.evidence,
                     APP_CONFIG.llm_api,
                     source_iis_version_id=session.confirmed_iis_version_id,
                     source_iis_version_number=session.draft.version,
                 )
-                session.action_guide = action_guide
-                session.action_guide_history.append(action_guide)
-                action_guide_version_id = SESSIONS.save_action_guide_version(
+                session.software_requirements = software_requirements
+                session.software_requirements_history.append(software_requirements)
+                software_requirements_version_id = SESSIONS.save_software_requirements_version(
                     session,
-                    action_guide,
+                    software_requirements,
                     source_type="generated_from_confirmed_iis",
                 )
                 SESSIONS.update_session_metadata(
                     session,
-                    mode="action_guide_mode",
-                    current_action_guide_version_id=action_guide_version_id,
-                    action_guide_outdated=False,
+                    mode="software_requirements_mode",
+                    current_software_requirements_version_id=software_requirements_version_id,
+                    software_requirements_outdated=False,
                 )
                 SESSIONS.save_user_event(
                     session.id,
-                    "generate_action_guide",
+                    "generate_software_requirements",
                     "user",
                     {
                         "iisVersionId": session.confirmed_iis_version_id,
-                        "actionGuideVersionId": action_guide_version_id,
+                        "softwareRequirementsVersionId": software_requirements_version_id,
                     },
                 )
                 SESSIONS.update_runtime_state(
                     session,
                     status="generated",
                     phase="done",
-                    message="Implementation Action Guide generated.",
+                    message="Software Requirements generated.",
                 )
                 self._json(
                     {
                         "draft": to_dict(session.draft),
-                        "actionGuide": to_dict(action_guide),
+                        "softwareRequirements": to_dict(software_requirements),
                         "mode": session.mode,
                         "confirmedIisVersionId": session.confirmed_iis_version_id,
-                        "currentActionGuideVersionId": session.current_action_guide_version_id,
-                        "actionGuideOutdated": session.action_guide_outdated,
+                        "currentSoftwareRequirementsVersionId": session.current_software_requirements_version_id,
+                        "softwareRequirementsOutdated": session.software_requirements_outdated,
                     }
                 )
                 return
@@ -985,12 +995,12 @@ class AppHandler(BaseHTTPRequestHandler):
                     )
                     return
                 SESSIONS.save_user_event(session.id, "reopen_iis", "user", {})
-                if session.action_guide is not None:
-                    session.action_guide_outdated = True
+                if session.software_requirements is not None:
+                    session.software_requirements_outdated = True
                 SESSIONS.update_session_metadata(
                     session,
                     mode="iis_mode",
-                    action_guide_outdated=session.action_guide_outdated,
+                    software_requirements_outdated=session.software_requirements_outdated,
                 )
                 SESSIONS.update_runtime_state(
                     session,
@@ -1001,9 +1011,9 @@ class AppHandler(BaseHTTPRequestHandler):
                 self._json(
                     {
                         "draft": to_dict(session.draft),
-                        "actionGuide": to_dict(session.action_guide) if session.action_guide else None,
+                        "softwareRequirements": to_dict(session.software_requirements) if session.software_requirements else None,
                         "mode": session.mode,
-                        "actionGuideOutdated": session.action_guide_outdated,
+                        "softwareRequirementsOutdated": session.software_requirements_outdated,
                     }
                 )
                 return

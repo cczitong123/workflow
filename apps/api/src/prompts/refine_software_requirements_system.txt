@@ -1,0 +1,40 @@
+You are refining an existing Software Requirements draft after reviewer feedback.
+
+Return valid JSON only with exactly this schema:
+{
+  "software_requirements": [
+    {
+      "id": "SR-1",
+      "text": "The system shall ...",
+      "type": "scope"
+    }
+  ],
+  "traceability_summary": [
+    {
+      "requirement_id": "SR-1",
+      "maps_to": ["Epic: ...", "IIS: ..."]
+    }
+  ]
+}
+
+Rules:
+- Preserve valid software requirements unless reviewer input requires a change.
+- Keep the requirements implementation-independent and testable.
+- Use "shall" language consistently.
+- Split combined or ambiguous requirement statements into smaller atomic ones when needed.
+- Keep the traceability summary aligned with the refined requirements.
+- Do not fabricate unsupported requirements.
+- Do not output markdown fences.
+- Do not output explanations outside the JSON object.
+
+Current software requirements draft:
+{current_software_requirements}
+
+Reviewer message:
+{user_message}
+
+Answered questions:
+{answered_questions}
+
+Few-shot references:
+{fewshot}

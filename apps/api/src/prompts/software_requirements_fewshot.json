@@ -1,0 +1,35 @@
+[
+  {
+    "description": "This is a bug CR for defect ticket:\n\n## System Behaviour\n\nNot all set conditions for PVis FZDs are restricted to PWF >= Wohnen (ie Wohnen, Fahrbereitschaft herstellen/beenden, Fahren, Hint: Not PAD)\n\nNotes:\n- This could lead to erroneous FZDs.\n- New ticket for issue for 26-03.\n\n## Technical Details\n\nChanges are required in:\n- Status of Video Watch Dog Event / Fieldueberwachung\n- Status of Video Watch Dog Signalueberwachung\n- pvisRenderingControl.PVisAvailability Event / Fieldueberwachung and Signalueberwachung\n- pvisRenderingControl.pvisStatus.degradation Signalueberwachung\n- parkingUserInteractionControl.parkmenuPrimaryDisplayAlive Signalueberwachung\n- StatusTrailer Event/Fieldueberwachung\n\nThe required correction is that not all set conditions for PVis FZDs are restricted to PWF >= Wohnen, and the affected scopes must correctly include Wohnen, FahrbereitschaftHerstellen, Fahren, and FahrbereitschaftBeenden where required. For the Video Watch Dog related logic, the relevant conditions include velocity below 36 km/h, IDCEvo startup timeout, and the valid PWF scope. NetworkMonitoringControl must also be enabled for the corresponding SI.",
+    "software_requirements": [
+      {
+        "id": "SR-1",
+        "text": "The system shall fulfill the PVis VideoWatchdog technical-error condition only when vehicle velocity is below 36 km/h, the IDCEvo startup-time condition is active, the valid PWF scope is Wohnen, FahrbereitschaftHerstellen, Fahren, or FahrbereitschaftBeenden, and NetworkMonitoringControl is enabled for the corresponding SI.",
+        "type": "behavior"
+      },
+      {
+        "id": "SR-2",
+        "text": "The system shall treat the Wohnen, FahrbereitschaftHerstellen, Fahren, and FahrbereitschaftBeenden scope as fulfilled only when pwfState remains in one of those states for at least 3 seconds.",
+        "type": "scope"
+      }
+    ],
+    "traceability_summary": [
+      {
+        "requirement_id": "SR-1",
+        "maps_to": [
+          "Epic: System Behaviour statement that not all set conditions for PVis FZDs are restricted to PWF >= Wohnen.",
+          "Epic: Technical Details notes for Status of Video Watch Dog Event / Fieldueberwachung and Signalueberwachung.",
+          "Epic: Technical Details conditions involving velocity below 36 km/h, IDCEvo startup timeout, and the corrected PWF scope.",
+          "Epic: Technical Details statement that NetworkMonitoringControl must be enabled for the SI."
+        ]
+      },
+      {
+        "requirement_id": "SR-2",
+        "maps_to": [
+          "Epic: System Behaviour scope note covering Wohnen, FahrbereitschaftHerstellen, Fahren, and FahrbereitschaftBeenden.",
+          "Epic: Technical Details correction that the relevant PWF scope must be explicitly represented for the affected PVis conditions."
+        ]
+      }
+    ]
+  }
+]

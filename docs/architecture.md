@@ -1,6 +1,6 @@
 # Agentic-Workflow Architecture
 
-Agentic-Workflow is an Epic analysis workflow for turning Epic descriptions into an `Implementation Intent Specification`, then deriving an `Implementation Action Guide`, with explicit retrieval, refinement, version history, and local persistence.
+Agentic-Workflow is an Epic analysis workflow for turning Epic descriptions into an `Implementation Intent Specification`, then deriving `Software Requirements` from the confirmed IIS, with explicit retrieval, refinement, version history, and local persistence.
 
 This document describes the current implementation shape, the main execution flow, and the boundaries between the major parts of the system.
 
@@ -90,14 +90,15 @@ Current workflow actions include:
 - session creation
 - initial IIS generation
 - IIS refinement
-- IIS confirmation and Action Guide generation
+- IIS confirmation
 - IIS reopen
-- Action Guide refinement
+- Software Requirements generation
+- Software Requirements refinement
 - retrieval re-run
 - version restore
 - partial progress exposure to the UI while generation is still running
 
-This layer should remain independent from the details of:
+This layer remains intentionally independent from the details of:
 
 - where Epic data comes from
 - how the LLM is called
@@ -120,7 +121,7 @@ Current behavior:
 - `description` remains raw text
 - historical `what_to_do` text is preserved and parsed into structured steps and file changes
 
-This layer now also supports imported Epic-shaped payload normalization and remains the natural place for Epic-source expansion.
+This layer also supports imported Epic-shaped payload normalization and remains the natural place for Epic-source expansion.
 
 ### 3. Integration layer
 
@@ -138,9 +139,9 @@ The LLM adapter currently handles:
 - retrieval-intent generation
 - retrieval-query generation
 - IIS generation
-- Action Guide generation
+- Software Requirements generation
 - IIS refinement and open-question regeneration
-- Action Guide refinement
+- Software Requirements refinement
 - remote authentication for BMW-style LLM access
 - token reuse through in-process caching
 - remote response parsing
@@ -190,7 +191,7 @@ The persistence layer currently stores enough information to support:
 - retrieval history
 - evidence snapshots
 - IIS version history
-- Action Guide version history
+- Software Requirements version history
 - restore operations
 - event-based trace reconstruction
 
@@ -210,6 +211,8 @@ The current initial path is:
 8. An `Implementation Intent Specification` is generated from the Epic description and evidence.
 9. The IIS is persisted as an artifact version.
 10. Version history becomes available in the UI.
+
+The current IIS output is intentionally more execution-oriented than an earlier high-level summary. It is the single editable implementation artifact that sits between the raw Epic description and the downstream Software Requirements.
 
 ### IIS refinement flow
 
@@ -231,7 +234,7 @@ The re-run retrieval flow is explicitly separated from refine.
 It currently:
 
 1. syncs the current IIS if it was manually edited
-2. reuses the original Epic description plus the latest user answers/notes
+2. reuses the original Epic description plus the latest user answers and notes
 3. regenerates retrieval intent and retrieval query
 4. reruns local code retrieval
 5. stores a new retrieval version
@@ -244,256 +247,183 @@ This separation is intentional so that:
 - retrieval changes are explicit
 - version history can distinguish pure IIS edits from evidence changes
 
-### IIS confirmation and Action Guide generation
+### IIS confirmation
 
-After the IIS is ready, the workflow enters a second stage:
+After the IIS is ready, the workflow can move into a confirmed state:
 
 1. the current IIS version is confirmed
 2. the confirmed IIS version id is recorded in session state
-3. an `Implementation Action Guide` is generated from:
+3. the IIS becomes read-only in the workbench
+4. the workbench switches into Software Requirements mode
+
+Confirmation does not automatically generate Software Requirements. It only locks the current IIS as the approved upstream source.
+
+### Software Requirements generation
+
+Once the IIS is confirmed:
+
+1. the user explicitly triggers Software Requirements generation
+2. `Software Requirements` are generated from:
    - the original Epic description
-   - the retrieval intent and retrieval query
-   - the current evidence set
    - the confirmed IIS
-4. the Action Guide is stored as its own artifact version
-5. the workbench switches into Action Guide mode
+3. the Software Requirements are stored as their own artifact version
+4. the workbench stays in Software Requirements mode
 
-### IIS reopen and Action Guide invalidation
+### IIS reopen and Software Requirements invalidation
 
-The confirmed IIS is not permanently locked.
+If the user decides to revise the IIS after confirmation:
 
-Instead:
+1. the IIS is reopened
+2. the workbench switches back into IIS mode
+3. once the IIS changes, the current Software Requirements are marked outdated
+4. the IIS must be reconfirmed to regenerate Software Requirements from the latest version
 
-1. the IIS can be reopened for editing
-2. the workbench switches back to IIS mode
-3. once the IIS changes, the current Action Guide is marked outdated
-4. the IIS must be reconfirmed to regenerate the Action Guide from the latest version
+### Software Requirements refinement
 
-### Action Guide refinement
+Once the Software Requirements exist:
 
-Once the Action Guide exists:
+1. the right-hand refine flow targets the Software Requirements instead of the IIS
+2. the Software Requirements are refined as their own artifact stream
+3. manual edits in the Software Requirements editor are synced back before refine calls
 
-1. the right-hand refine flow targets the Action Guide instead of the IIS
-2. the Action Guide is refined as its own artifact stream
-3. the guide keeps a link to the IIS version it was generated from
+### Version restore
 
-### Restore flow
+The current restore model is artifact-aware:
 
-Restore does not erase history.
+1. a previous IIS or Software Requirements version is selected
+2. the restored content is re-saved as a new current version
+3. session pointers are updated to that newly restored version
+4. mode and outdated state are recomputed from the restored artifact type and source IIS linkage
 
-Instead:
+The system does not delete later versions when restoring. Restore produces a new head version.
 
-1. a previous IIS or Action Guide version is selected
-2. its stored artifact payload is loaded
-3. a new artifact version is created from that older state
-
-This keeps the historical chain intact while allowing rollback in the UI.
-
-## Prompt architecture
+## Prompt system
 
 Prompt assets live in:
 
 - `/apps/api/src/prompts/`
 
-### Active system prompts
+### Active prompt files
 
 - `/apps/api/src/prompts/retrieval_intent_system.txt`
 - `/apps/api/src/prompts/retrieval_query_system.txt`
 - `/apps/api/src/prompts/draft_generation_system.txt`
 - `/apps/api/src/prompts/refine_open_questions_system.txt`
-- `/apps/api/src/prompts/implementation_action_guide_system.txt`
-- `/apps/api/src/prompts/refine_implementation_action_guide_system.txt`
+- `/apps/api/src/prompts/software_requirements_system.txt`
+- `/apps/api/src/prompts/refine_software_requirements_system.txt`
 
-### Few-shot strategy
-
-The system currently keeps few-shot interfaces available for multiple stages, but only one path is actively emphasized:
+### Few-shot assets
 
 - `/apps/api/src/prompts/retrieval_query_fewshot.json`
+  Active few-shot examples for `description -> retrieval query`.
 
-This file is intended for `description -> retrieval query` examples.
+- `/apps/api/src/prompts/software_requirements_fewshot.json`
+  Preferred few-shot direction for the Software Requirements stage. Current strategy is to use clean `description -> software requirements` paired examples rather than noisy assumptions or historical low-quality `whatToDo`.
 
-The following files are preserved as future extension points and can remain empty arrays until needed:
+Other prompt few-shot files remain available as extension points but are currently optional or empty.
 
-- `/apps/api/src/prompts/retrieval_intent_fewshot.json`
-- `/apps/api/src/prompts/draft_generation_fewshot.json`
-- `/apps/api/src/prompts/refine_open_questions_fewshot.json`
-- `/apps/api/src/prompts/implementation_action_guide_fewshot.json`
+## Data-model boundaries
 
-This design keeps the interfaces stable while allowing future prompt enrichment without backend restructuring.
+The main workflow artifacts are currently:
 
-## Frontend interaction model
+### Retrieval intent
 
-The browser workbench is currently organized into three functional panels.
+Represents:
 
-### Left panel: Context & Retrieval
+- Epic understanding for code retrieval
+- a technical summary
+- keywords
+- suspected areas
+- the retrieval query
 
-This panel is used for:
+### Implementation Intent Specification
+
+Represents:
+
+- fine-grained implementation rules
+- `what_to_do`-style behavior decomposition
+- `where_to_change` guidance
+- open questions for uncertainty handling
+
+It is stored as the main upper editable artifact.
+
+### Software Requirements
+
+Represents:
+
+- atomic `shall` requirements
+- traceability summary back to Epic and IIS inputs
+- a downstream, testable, implementation-independent requirements layer
+
+It is stored as a separate artifact stream and records which IIS version it was generated from.
+
+## Persistence model
+
+The SQLite store uses:
+
+- a single `draft_versions` table for multiple artifact streams
+- an `artifact_type` field to distinguish IIS and Software Requirements
+- event records for workflow traceability
+- session pointers for current IIS version, current Software Requirements version, and confirmed IIS version
+
+This model keeps the schema compact while still allowing:
+
+- separate artifact histories
+- restore operations
+- outdated detection
+- source-IIS traceability for Software Requirements
+
+## Frontend behavior model
+
+The browser workbench currently has three main areas:
+
+### Left panel
 
 - Epic context
 - retrieval intent
 - code evidence
-- explicit retrieval actions
+- explicit retrieval re-run action
 
-### Center panel: Draft Workspace
+### Center panel
 
-This panel is the main work surface and is used for:
+- `Implementation Intent Specification`
+- confirm / reopen IIS controls
+- explicit Software Requirements generation
+- `Software Requirements` editor
 
-- the current `Implementation Intent Specification`
-- IIS editing and confirmation
-- the current `Implementation Action Guide`
-- source-version and outdated state display
-
-### Right panel: Review & History
-
-This panel is used for:
+### Right panel
 
 - open questions
-- refinement input
+- refine workflow
 - version history
 
 The refine target changes by mode:
 
 - in IIS mode, refine updates the IIS
-- in Action Guide mode, refine updates the Action Guide
+- in Software Requirements mode, refine updates the Software Requirements
 
-### UI progress model
+## Current workflow guarantees
 
-The UI intentionally exposes workflow phases rather than percentage progress.
+The current implementation explicitly preserves the following product behaviors:
 
-Typical phases include:
+- generation and refinement are separate operations
+- retrieval re-run is explicit rather than implicit
+- IIS confirmation is a distinct phase change
+- Software Requirements generation is explicit and independently triggerable
+- reopening the IIS does not destroy existing downstream versions
+- manual edits are synced before refinement or downstream generation
+- version history restores create new current versions instead of rewriting history
 
-- generating retrieval intent
-- generating retrieval query
-- searching code evidence
-- generating the IIS
-- refining the IIS
-- generating the Action Guide
-- refining the Action Guide
-- re-running retrieval
-- restoring version
-- confirming the IIS
+## Extension directions
 
-Partial results are exposed progressively so the UI can show:
+The current architecture is already shaped so that future work can add:
 
-- Epic context first
-- retrieval intent next
-- evidence next
-- draft last
+- richer Jira browsing and filtering
+- better Software Requirements few-shot coverage
+- trace-pack export APIs
+- cloud persistence
+- stronger requirements traceability or downstream tool export
 
-instead of waiting for the full workflow to finish before rendering anything.
+without changing the core workflow shape of:
 
-### Current Epic source behavior
-
-The current browser workbench exposes Jira import as the active Epic-loading path.
-
-The local Epic repository still exists in the backend for:
-
-- development support
-- repository-level normalization
-- compatibility with imported Epic-shaped payloads
-
-but it is no longer the main interactive import path in the UI.
-
-## Persistence and traceability
-
-The current SQLite-backed structure is intentionally designed to support later trace-pack generation.
-
-Important persisted elements already include:
-
-- session metadata
-- retrieval versions
-- evidence snapshots
-- IIS versions
-- Action Guide versions
-- user events
-
-This allows later reconstruction of:
-
-- what was generated
-- what changed between versions
-- whether retrieval was rerun
-- which evidence supported each draft state
-- which user actions contributed to the final state
-
-The current export helpers under `/tools/` are built around this structure.
-
-## Current export tooling
-
-The `/tools/` directory contains standalone inspection scripts that read the SQLite database and export JSON for local debugging and demo analysis.
-
-These tools currently cover:
-
-- full session timeline export
-- single draft version export
-- single retrieval version export
-- version diff export
-- trace-pack export
-
-They are configured through editable values at the top of each script instead of command-line arguments.
-
-## Configuration model
-
-Runtime configuration is split into two layers.
-
-### Defaults
-
-- `/apps/api/src/config.py`
-
-This file contains:
-
-- non-sensitive default values
-- local retrieval defaults
-- model defaults
-- database path defaults
-- path normalization logic
-
-### Overrides
-
-- `/.env`
-
-This file is intended for:
-
-- machine-specific paths
-- credentials
-- endpoints
-- secret keys
-
-Configuration precedence is:
-
-1. exported environment variables
-2. values from `/.env`
-3. defaults from `/apps/api/src/config.py`
-
-The environment-variable prefix is:
-
-- `AGENTIC_WORKFLOW_*`
-
-## Migration direction
-
-The current codebase keeps local persistence and local retrieval, but several boundaries are already aligned with future expansion.
-
-### Future Epic providers
-
-The current Jira-backed browser path and the local repository normalization layer are intentionally separated so that additional Epic providers can later be added without changing the workflow orchestration model.
-
-### Future persistence backends
-
-SQLite is currently the local persistence backend, but the repository-style persistence layer can later be replaced with a cloud database implementation.
-
-### Future trace pack and audit export
-
-The current event and version structure is already suitable for later trace-pack generation, confirmation snapshots, and audit-style export.
-
-## Summary
-
-The current architecture is centered on:
-
-- explicit workflow actions
-- Jira-based Epic import in the current UI
-- prompt-driven generation stages
-- local retrieval evidence
-- structured draft version history
-- SQLite-based local persistence
-- future-friendly boundaries for providers, persistence, and trace export
-
-This keeps the current demo usable while preserving a clean path toward more formal cloud-backed workflow evolution.
+Epic description -> retrieval -> IIS -> confirm/reopen -> Software Requirements

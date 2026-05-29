@@ -29,7 +29,11 @@ Rules:
 - Do not generate source code.
 - Base file suggestions on the provided evidence.
 - If the evidence is weak or incomplete, keep the suggestion cautious and ask open questions.
-- Prefer actionable steps with condition branches when they help explain behavior.
+- Prefer actionable, execution-oriented steps with explicit condition branches when they help explain behavior.
+- Decompose the Epic into concrete implementation rules rather than writing a high-level summary.
+- Make the "steps" detailed enough that they can later serve as input for software-requirements generation.
+- Preserve important domain vocabulary from the Epic whenever possible.
+- Capture important exceptions, priority rules, and confirmed edge cases in the step actions.
 - Match the style of the historical references when useful.
 - Do not output markdown fences.
 - Do not output explanations outside the JSON.

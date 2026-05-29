@@ -81,10 +81,10 @@ class WhatToDoDraft:
 
 
 @dataclass
-class ImplementationActionGuide:
+class SoftwareRequirementsDraft:
     version: int
-    what_to_do: list[str]
-    where_to_change: list[str]
+    requirements: list[str]
+    traceability_summary: list[str]
     raw_text: str
     source_iis_version_id: int | None = None
     source_iis_version_number: int | None = None
@@ -128,18 +128,18 @@ class Session:
     evidence: list[EvidenceItem] = field(default_factory=list)
     draft: WhatToDoDraft | None = None
     draft_history: list[WhatToDoDraft] = field(default_factory=list)
-    action_guide: ImplementationActionGuide | None = None
-    action_guide_history: list[ImplementationActionGuide] = field(default_factory=list)
+    software_requirements: SoftwareRequirementsDraft | None = None
+    software_requirements_history: list[SoftwareRequirementsDraft] = field(default_factory=list)
     reference_samples: list[ParsedWhatToDo] = field(default_factory=list)
     status: str = "idle"
     current_phase: str = "idle"
     current_message: str = ""
     mode: str = "iis_mode"
-    action_guide_outdated: bool = False
+    software_requirements_outdated: bool = False
     confirmed_iis_version_id: int | None = None
     current_retrieval_version_id: int | None = None
     current_draft_version_id: int | None = None
-    current_action_guide_version_id: int | None = None
+    current_software_requirements_version_id: int | None = None
 
 
 def to_dict(value: Any) -> Any:

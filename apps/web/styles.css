@@ -455,6 +455,84 @@ body {
   min-height: 600px;
 }
 
+.software-requirements-cards {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.software-requirements-section {
+  display: grid;
+  gap: 10px;
+}
+
+.software-requirements-section-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #173042;
+}
+
+.software-requirements-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.software-requirements-card {
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(19, 60, 85, 0.08);
+  box-shadow: 0 8px 18px rgba(17, 33, 45, 0.06);
+  padding: 12px 14px;
+}
+
+.software-requirements-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.software-requirements-card-id {
+  font-size: 13px;
+  font-weight: 700;
+  color: #133c55;
+}
+
+.software-requirements-card-type {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(19, 60, 85, 0.08);
+  color: #476072;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.software-requirements-card-body {
+  color: #11212d;
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.software-requirements-trace-list {
+  margin: 0;
+  padding-left: 18px;
+  color: #264653;
+}
+
+.software-requirements-trace-list li {
+  margin-bottom: 8px;
+  line-height: 1.45;
+}
+
 .action-guide-surface.is-empty {
   display: none;
 }

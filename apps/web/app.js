@@ -7,7 +7,7 @@ let currentVersions = [];
 let activePollId = null;
 let currentImportedEpic = null;
 let workspaceMode = "iis_mode";
-let actionGuideOutdated = false;
+let softwareRequirementsOutdated = false;
 let confirmedIisVersionId = null;
 let actionGuideBusy = false;
 const PANEL_STORAGE_KEY = "agentic-workflow-workspace-widths";
@@ -169,23 +169,23 @@ function updateWorkspaceModeUI() {
 
   refineButton.disabled =
     !currentSessionId ||
-    (workspaceMode === "action_guide_mode" ? !currentActionGuide : !currentDraft);
-  confirmButton.disabled = !currentSessionId || !currentDraft || workspaceMode === "action_guide_mode";
-  reopenButton.disabled = !currentSessionId || workspaceMode !== "action_guide_mode";
-  rerunButton.disabled = !currentSessionId || workspaceMode === "action_guide_mode";
+    (workspaceMode === "software_requirements_mode" ? !currentActionGuide : !currentDraft);
+  confirmButton.disabled = !currentSessionId || !currentDraft || workspaceMode === "software_requirements_mode";
+  reopenButton.disabled = !currentSessionId || workspaceMode !== "software_requirements_mode";
+  rerunButton.disabled = !currentSessionId || workspaceMode === "software_requirements_mode";
   generateActionGuideButton.disabled =
     actionGuideBusy ||
     !currentSessionId ||
-    workspaceMode !== "action_guide_mode" ||
+    workspaceMode !== "software_requirements_mode" ||
     !currentDraft ||
     currentDraftVersionId == null ||
     confirmedIisVersionId == null ||
     currentDraftVersionId !== confirmedIisVersionId;
 
-  if (workspaceMode === "action_guide_mode") {
-    refineHeading.textContent = "Refine Implementation Action Guide";
-    refineInput.placeholder = "Add reviewer guidance or answer a question to refine the current action guide...";
-    refineButton.textContent = "Refine Action Guide";
+  if (workspaceMode === "software_requirements_mode") {
+    refineHeading.textContent = "Refine Software Requirements";
+    refineInput.placeholder = "Add reviewer guidance or answer a question to refine the current software requirements draft...";
+    refineButton.textContent = "Refine Software Requirements";
     confirmButton.classList.add("hidden");
     reopenButton.classList.remove("hidden");
     draftEditor.readOnly = true;
@@ -202,7 +202,7 @@ function updateWorkspaceModeUI() {
   }
 
   generateActionGuideButton.textContent =
-    currentActionGuide && actionGuideOutdated ? "Regenerate Action Guide" : "Generate Action Guide";
+    currentActionGuide && softwareRequirementsOutdated ? "Regenerate Software Requirements" : "Generate Software Requirements";
 
   if (currentActionGuide && currentActionGuide.source_iis_version_number) {
     actionGuideMeta.textContent = `Generated from IIS Version ${currentActionGuide.source_iis_version_number}`;
@@ -210,7 +210,7 @@ function updateWorkspaceModeUI() {
     actionGuideMeta.textContent = "";
   }
 
-  actionGuideOutdatedNode.classList.toggle("hidden", !actionGuideOutdated);
+  actionGuideOutdatedNode.classList.toggle("hidden", !softwareRequirementsOutdated);
   emptyState.classList.toggle("hidden", Boolean(currentActionGuide));
 }
 
@@ -246,13 +246,13 @@ async function pollSessionStatus(sessionId) {
       renderDraft(status.draft);
       renderVersionMeta();
     }
-    if (status.actionGuide) {
-      renderActionGuide(status.actionGuide);
+    if (status.softwareRequirements) {
+      renderActionGuide(status.softwareRequirements);
     }
     workspaceMode = status.mode || workspaceMode;
-    actionGuideOutdated = Boolean(status.actionGuideOutdated);
+    softwareRequirementsOutdated = Boolean(status.softwareRequirementsOutdated);
     confirmedIisVersionId = status.confirmedIisVersionId ?? confirmedIisVersionId;
-    currentActionGuideVersionId = status.currentActionGuideVersionId ?? currentActionGuideVersionId;
+    currentActionGuideVersionId = status.currentSoftwareRequirementsVersionId ?? currentActionGuideVersionId;
     updateWorkspaceModeUI();
     if (status.status === "error") {
       setStatus({
@@ -383,6 +383,198 @@ function renderDraft(draft) {
   renderQuestions(draft?.open_questions || []);
 }
 
+function parseDraftFromRawText(rawText, fallbackDraft) {
+  const steps = [];
+  const filesToChange = [];
+  let currentSection = "what_to_do";
+  let currentStep = null;
+
+  rawText.split("\n").forEach((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      return;
+    }
+    const lower = trimmed.toLowerCase();
+    if (lower === "## what to do") {
+      currentSection = "what_to_do";
+      currentStep = null;
+      return;
+    }
+    if (lower === "## where to change") {
+      currentSection = "where_to_change";
+      currentStep = null;
+      return;
+    }
+
+    if (currentSection === "what_to_do") {
+      if (/^-\s+/.test(line) && !/^\s+-\s+/.test(line)) {
+        currentStep = {
+          condition: trimmed.replace(/^-\s+/, "").trim(),
+          actions: [],
+        };
+        steps.push(currentStep);
+        return;
+      }
+      if (/^\s+-\s+/.test(line)) {
+        const actionText = trimmed.replace(/^-\s+/, "").trim();
+        if (!currentStep) {
+          currentStep = { condition: "", actions: [] };
+          steps.push(currentStep);
+        }
+        currentStep.actions.push(actionText);
+      }
+      return;
+    }
+
+    if (currentSection === "where_to_change" && /^-\s+/.test(trimmed)) {
+      const itemText = trimmed.replace(/^-\s+/, "").trim();
+      const match = itemText.match(/^`?([^`]+?)`?:\s*(.+)$/);
+      if (match) {
+        filesToChange.push({ path: match[1].trim(), reason: match[2].trim() });
+      } else {
+        filesToChange.push({ path: itemText, reason: "" });
+      }
+    }
+  });
+
+  return {
+    ...fallbackDraft,
+    raw_text: rawText,
+    steps: steps.length ? steps : fallbackDraft?.steps || [],
+    files_to_change: filesToChange.length ? filesToChange : fallbackDraft?.files_to_change || [],
+  };
+}
+
+function parseSoftwareRequirementsFromRawText(rawText, fallbackRequirements) {
+  const requirements = [];
+  const traceabilitySummary = [];
+  let currentSection = "requirements";
+
+  rawText.split("\n").forEach((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      return;
+    }
+    const lower = trimmed.toLowerCase();
+    if (lower === "## software requirements") {
+      currentSection = "requirements";
+      return;
+    }
+    if (lower === "## traceability summary") {
+      currentSection = "traceability_summary";
+      return;
+    }
+
+    let item = trimmed;
+    if (item.startsWith("- ")) {
+      item = item.slice(2).trim();
+    } else {
+      item = item.replace(/^\d+\.\s*/, "").trim();
+    }
+    if (!item) {
+      return;
+    }
+    if (currentSection === "traceability_summary") {
+      traceabilitySummary.push(item);
+    } else {
+      requirements.push(item);
+    }
+  });
+
+  return {
+    ...fallbackRequirements,
+    raw_text: rawText,
+    requirements: requirements.length ? requirements : fallbackRequirements?.requirements || [],
+    traceability_summary: traceabilitySummary.length
+      ? traceabilitySummary
+      : fallbackRequirements?.traceability_summary || [],
+  };
+}
+
+function renderSoftwareRequirementsCards(softwareRequirements) {
+  const cardsNode = document.getElementById("softwareRequirementsCards");
+  cardsNode.innerHTML = "";
+
+  if (!softwareRequirements) {
+    cardsNode.classList.add("hidden");
+    return;
+  }
+
+  const requirements = softwareRequirements.requirements || [];
+  const traceability = softwareRequirements.traceability_summary || [];
+
+  if (!requirements.length && !traceability.length) {
+    cardsNode.classList.add("hidden");
+    return;
+  }
+
+  cardsNode.classList.remove("hidden");
+
+  if (requirements.length) {
+    const section = document.createElement("section");
+    section.className = "software-requirements-section";
+
+    const title = document.createElement("h4");
+    title.className = "software-requirements-section-title";
+    title.textContent = "Software Requirements";
+    section.appendChild(title);
+
+    const grid = document.createElement("div");
+    grid.className = "software-requirements-grid";
+
+    requirements.forEach((item, index) => {
+      const card = document.createElement("article");
+      card.className = "software-requirements-card";
+
+      const head = document.createElement("div");
+      head.className = "software-requirements-card-head";
+
+      const idNode = document.createElement("span");
+      idNode.className = "software-requirements-card-id";
+      const idMatch = item.match(/^(SR-\d+):/i);
+      idNode.textContent = idMatch ? idMatch[1].toUpperCase() : `SR-${index + 1}`;
+
+      const typeNode = document.createElement("span");
+      typeNode.className = "software-requirements-card-type";
+      typeNode.textContent = "Requirement";
+
+      head.appendChild(idNode);
+      head.appendChild(typeNode);
+
+      const body = document.createElement("div");
+      body.className = "software-requirements-card-body";
+      body.textContent = item.replace(/^(SR-\d+):\s*/i, "");
+
+      card.appendChild(head);
+      card.appendChild(body);
+      grid.appendChild(card);
+    });
+
+    section.appendChild(grid);
+    cardsNode.appendChild(section);
+  }
+
+  if (traceability.length) {
+    const section = document.createElement("section");
+    section.className = "software-requirements-section";
+
+    const title = document.createElement("h4");
+    title.className = "software-requirements-section-title";
+    title.textContent = "Traceability Summary";
+    section.appendChild(title);
+
+    const list = document.createElement("ul");
+    list.className = "software-requirements-trace-list";
+    traceability.forEach((item) => {
+      const entry = document.createElement("li");
+      entry.textContent = item;
+      list.appendChild(entry);
+    });
+    section.appendChild(list);
+    cardsNode.appendChild(section);
+  }
+}
+
 function renderActionGuide(actionGuide) {
   currentActionGuide = actionGuide;
   const surface = document.getElementById("actionGuideSurface");
@@ -392,6 +584,7 @@ function renderActionGuide(actionGuide) {
     surface.classList.remove("is-filled");
     surface.classList.add("is-empty");
     editor.value = "";
+    renderSoftwareRequirementsCards(null);
     updateWorkspaceModeUI();
     return;
   }
@@ -399,6 +592,7 @@ function renderActionGuide(actionGuide) {
   surface.classList.remove("is-empty");
   surface.classList.add("is-filled");
   editor.value = actionGuide.raw_text || "";
+  renderSoftwareRequirementsCards(actionGuide);
 
   updateWorkspaceModeUI();
 }
@@ -408,10 +602,7 @@ function syncDraftFromEditor() {
     return null;
   }
   const editorValue = document.getElementById("draftEditor").value;
-  currentDraft = {
-    ...currentDraft,
-    raw_text: editorValue,
-  };
+  currentDraft = parseDraftFromRawText(editorValue, currentDraft);
   return currentDraft;
 }
 
@@ -420,10 +611,8 @@ function syncActionGuideFromEditor() {
     return null;
   }
   const editorValue = document.getElementById("actionGuideEditor").value;
-  currentActionGuide = {
-    ...currentActionGuide,
-    raw_text: editorValue,
-  };
+  currentActionGuide = parseSoftwareRequirementsFromRawText(editorValue, currentActionGuide);
+  renderSoftwareRequirementsCards(currentActionGuide);
   return currentActionGuide;
 }
 
@@ -434,9 +623,9 @@ function renderVersionMeta() {
     return;
   }
   const stateLabel =
-    workspaceMode === "action_guide_mode"
+    workspaceMode === "software_requirements_mode"
       ? `Confirmed Version ${currentDraft.version}`
-      : actionGuideOutdated
+      : softwareRequirementsOutdated
         ? `Version ${currentDraft.version} • Editing again`
         : `Version ${currentDraft.version} • Draft`;
   node.textContent = stateLabel;
@@ -449,7 +638,7 @@ async function loadVersions() {
   const data = await fetchJson(`/api/sessions/${currentSessionId}/versions`);
   currentVersions = data.versions || [];
   currentDraftVersionId = data.currentDraftVersionId;
-  currentActionGuideVersionId = data.currentActionGuideVersionId;
+  currentActionGuideVersionId = data.currentSoftwareRequirementsVersionId;
   renderVersions();
 }
 
@@ -468,15 +657,15 @@ function renderVersions() {
 
     const info = document.createElement("div");
     const title = document.createElement("strong");
-    const artifactLabel = version.artifact_type === "action_guide" ? "Guide" : "IIS";
+    const artifactLabel = version.artifact_type === "software_requirements" ? "SQ" : "IIS";
     title.textContent = `${artifactLabel} v${version.version_number}`;
     const meta = document.createElement("span");
     meta.className = "version-meta";
     const isCurrent =
-      (version.artifact_type === "action_guide" && version.id === currentActionGuideVersionId) ||
-      (version.artifact_type !== "action_guide" && version.id === currentDraftVersionId);
+      (version.artifact_type === "software_requirements" && version.id === currentActionGuideVersionId) ||
+      (version.artifact_type !== "software_requirements" && version.id === currentDraftVersionId);
     const sourceSuffix =
-      version.artifact_type === "action_guide" && version.source_iis_version_number
+      version.artifact_type === "software_requirements" && version.source_iis_version_number
         ? ` • from IIS v${version.source_iis_version_number}`
         : "";
     meta.textContent = `${formatVersionSourceType(version.source_type)} • ${version.created_at}${sourceSuffix}${isCurrent ? " • current" : ""}`;
@@ -544,7 +733,7 @@ function resetWorkspace({ showWaiting = false } = {}) {
   currentActionGuideVersionId = null;
   currentVersions = [];
   workspaceMode = "iis_mode";
-  actionGuideOutdated = false;
+  softwareRequirementsOutdated = false;
   confirmedIisVersionId = null;
   document.getElementById("draftEditor").value = "";
   document.getElementById("actionGuideEditor").value = "";
@@ -627,9 +816,9 @@ async function generate() {
     renderIntent(generated.retrievalIntent);
     renderEvidence(generated.evidence);
     renderDraft(generated.draft);
-    renderActionGuide(generated.actionGuide || null);
+    renderActionGuide(generated.softwareRequirements || null);
     workspaceMode = generated.mode || "iis_mode";
-    actionGuideOutdated = Boolean(generated.actionGuideOutdated);
+    softwareRequirementsOutdated = Boolean(generated.softwareRequirementsOutdated);
     confirmedIisVersionId = generated.confirmedIisVersionId ?? null;
     renderVersionMeta();
     updateWorkspaceModeUI();
@@ -657,8 +846,8 @@ async function refine() {
   setStatus({
     title: "In Progress",
     message:
-      workspaceMode === "action_guide_mode"
-        ? "Refining Implementation Action Guide..."
+      workspaceMode === "software_requirements_mode"
+        ? "Refining Software Requirements..."
         : "Refining Implementation Intent Specification...",
     variant: "busy",
     busy: true,
@@ -673,14 +862,14 @@ async function refine() {
         userMessage,
         answeredQuestions,
         currentDraft,
-        currentActionGuide,
+        currentSoftwareRequirements: currentActionGuide,
       }),
     });
     if (refined.draft) {
       renderDraft(refined.draft);
     }
-    if (refined.actionGuide) {
-      renderActionGuide(refined.actionGuide);
+    if (refined.softwareRequirements) {
+      renderActionGuide(refined.softwareRequirements);
     }
     renderVersionMeta();
     await loadVersions();
@@ -688,8 +877,8 @@ async function refine() {
     setStatus({
       title: "Ready",
       message:
-        workspaceMode === "action_guide_mode"
-          ? "Implementation Action Guide refined."
+        workspaceMode === "software_requirements_mode"
+          ? "Software Requirements refined."
           : "Implementation Intent Specification refined.",
       variant: "idle",
       busy: false,
@@ -726,7 +915,7 @@ async function rerunRetrieval() {
     renderEvidence(result.evidence);
     renderDraft(result.draft);
     workspaceMode = "iis_mode";
-    actionGuideOutdated = Boolean(result.actionGuideOutdated);
+    softwareRequirementsOutdated = Boolean(result.softwareRequirementsOutdated);
     renderVersionMeta();
     updateWorkspaceModeUI();
     await loadVersions();
@@ -760,15 +949,15 @@ async function restoreVersion(versionId) {
       body: JSON.stringify({}),
     });
     currentDraftVersionId = result.currentDraftVersionId;
-    currentActionGuideVersionId = result.currentActionGuideVersionId ?? currentActionGuideVersionId;
+    currentActionGuideVersionId = result.currentSoftwareRequirementsVersionId ?? currentActionGuideVersionId;
     if (result.draft) {
       renderDraft(result.draft);
     }
-    if ("actionGuide" in result) {
-      renderActionGuide(result.actionGuide);
+    if ("softwareRequirements" in result) {
+      renderActionGuide(result.softwareRequirements);
     }
     workspaceMode = result.mode || workspaceMode;
-    actionGuideOutdated = Boolean(result.actionGuideOutdated);
+    softwareRequirementsOutdated = Boolean(result.softwareRequirementsOutdated);
     renderVersionMeta();
     updateWorkspaceModeUI();
     await loadVersions();
@@ -796,12 +985,12 @@ async function confirmIis() {
       body: JSON.stringify({ currentDraft }),
     });
     renderDraft(result.draft);
-    workspaceMode = result.mode || "action_guide_mode";
+    workspaceMode = result.mode || "software_requirements_mode";
     confirmedIisVersionId = result.confirmedIisVersionId ?? confirmedIisVersionId;
-    if ("actionGuide" in result) {
-      renderActionGuide(result.actionGuide);
+    if ("softwareRequirements" in result) {
+      renderActionGuide(result.softwareRequirements);
     }
-    actionGuideOutdated = Boolean(result.actionGuideOutdated);
+    softwareRequirementsOutdated = Boolean(result.softwareRequirementsOutdated);
     renderVersionMeta();
     updateWorkspaceModeUI();
     await loadVersions();
@@ -823,27 +1012,27 @@ async function generateActionGuide() {
     syncActionGuideFromEditor();
   }
   actionGuideBusy = true;
-  setStatus({ title: "In Progress", message: "Generating Implementation Action Guide...", variant: "busy", busy: true });
+  setStatus({ title: "In Progress", message: "Generating Software Requirements...", variant: "busy", busy: true });
   applyBusyState({ generate: true, refine: true, rerun: true, confirm: true, actionGuide: true });
   startStatusPolling(currentSessionId);
 
   try {
-    const result = await fetchJson(`/api/sessions/${currentSessionId}/generate-action-guide`, {
+    const result = await fetchJson(`/api/sessions/${currentSessionId}/generate-software-requirements`, {
       method: "POST",
-      body: JSON.stringify({ currentDraft, currentActionGuide }),
+      body: JSON.stringify({ currentDraft, currentSoftwareRequirements: currentActionGuide }),
     });
     if (result.draft) {
       renderDraft(result.draft);
     }
-    renderActionGuide(result.actionGuide);
-    workspaceMode = result.mode || "action_guide_mode";
+    renderActionGuide(result.softwareRequirements);
+    workspaceMode = result.mode || "software_requirements_mode";
     confirmedIisVersionId = result.confirmedIisVersionId ?? confirmedIisVersionId;
-    currentActionGuideVersionId = result.currentActionGuideVersionId ?? currentActionGuideVersionId;
-    actionGuideOutdated = Boolean(result.actionGuideOutdated);
+    currentActionGuideVersionId = result.currentSoftwareRequirementsVersionId ?? currentActionGuideVersionId;
+    softwareRequirementsOutdated = Boolean(result.softwareRequirementsOutdated);
     renderVersionMeta();
     updateWorkspaceModeUI();
     await loadVersions();
-    setStatus({ title: "Ready", message: "Implementation Action Guide generated.", variant: "idle", busy: false });
+    setStatus({ title: "Ready", message: "Software Requirements generated.", variant: "idle", busy: false });
   } catch (error) {
     setStatus({ title: "Error", message: error.message, variant: "error", busy: false });
   } finally {
@@ -866,12 +1055,12 @@ async function reopenIis() {
       body: JSON.stringify({}),
     });
     workspaceMode = result.mode || "iis_mode";
-    actionGuideOutdated = Boolean(result.actionGuideOutdated);
+    softwareRequirementsOutdated = Boolean(result.softwareRequirementsOutdated);
     if (result.draft) {
       renderDraft(result.draft);
     }
-    if ("actionGuide" in result) {
-      renderActionGuide(result.actionGuide);
+    if ("softwareRequirements" in result) {
+      renderActionGuide(result.softwareRequirements);
     }
     renderVersionMeta();
     updateWorkspaceModeUI();

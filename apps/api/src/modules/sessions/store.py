@@ -11,10 +11,10 @@ from pathlib import Path
 from modules.shared.models import (
     DraftVersionRecord,
     EvidenceItem,
-    ImplementationActionGuide,
     RetrievalIntent,
     RetrievalVersionRecord,
     Session,
+    SoftwareRequirementsDraft,
     WhatToDoDraft,
 )
 
@@ -162,7 +162,7 @@ class SessionStore:
                     session.current_phase,
                     session.current_message,
                     session.mode,
-                    1 if session.action_guide_outdated else 0,
+                    1 if session.software_requirements_outdated else 0,
                     session.confirmed_iis_version_id,
                     None,
                     None,
@@ -205,24 +205,24 @@ class SessionStore:
         session: Session,
         *,
         mode: str | None = None,
-        action_guide_outdated: bool | None = None,
+        software_requirements_outdated: bool | None = None,
         confirmed_iis_version_id: int | None = None,
         current_retrieval_version_id: int | None = None,
         current_draft_version_id: int | None = None,
-        current_action_guide_version_id: int | None = None,
+        current_software_requirements_version_id: int | None = None,
     ) -> None:
         if mode is not None:
             session.mode = mode
-        if action_guide_outdated is not None:
-            session.action_guide_outdated = action_guide_outdated
+        if software_requirements_outdated is not None:
+            session.software_requirements_outdated = software_requirements_outdated
         if confirmed_iis_version_id is not None:
             session.confirmed_iis_version_id = confirmed_iis_version_id
         if current_retrieval_version_id is not None:
             session.current_retrieval_version_id = current_retrieval_version_id
         if current_draft_version_id is not None:
             session.current_draft_version_id = current_draft_version_id
-        if current_action_guide_version_id is not None:
-            session.current_action_guide_version_id = current_action_guide_version_id
+        if current_software_requirements_version_id is not None:
+            session.current_software_requirements_version_id = current_software_requirements_version_id
 
         now = _utc_now()
         with self._lock:
@@ -236,11 +236,11 @@ class SessionStore:
                 """,
                 (
                     session.mode,
-                    1 if session.action_guide_outdated else 0,
+                    1 if session.software_requirements_outdated else 0,
                     session.confirmed_iis_version_id,
                     session.current_retrieval_version_id,
                     session.current_draft_version_id,
-                    session.current_action_guide_version_id,
+                    session.current_software_requirements_version_id,
                     now,
                     session.id,
                 ),
@@ -358,7 +358,7 @@ class SessionStore:
                 ),
             )
             draft_version_id = int(cursor.lastrowid)
-            if artifact_type == "action_guide":
+            if artifact_type == "software_requirements":
                 self._connection.execute(
                     """
                     UPDATE sessions
@@ -398,16 +398,16 @@ class SessionStore:
                 ),
             )
             self._connection.commit()
-        if artifact_type == "action_guide":
-            session.current_action_guide_version_id = draft_version_id
+        if artifact_type == "software_requirements":
+            session.current_software_requirements_version_id = draft_version_id
         else:
             session.current_draft_version_id = draft_version_id
         return draft_version_id
 
-    def save_action_guide_version(
+    def save_software_requirements_version(
         self,
         session: Session,
-        action_guide: ImplementationActionGuide,
+        software_requirements: SoftwareRequirementsDraft,
         *,
         source_type: str,
     ) -> int:
@@ -422,15 +422,15 @@ class SessionStore:
                 """,
                 (
                     session.id,
-                    action_guide.version,
-                    "action_guide",
+                    software_requirements.version,
+                    "software_requirements",
                     source_type,
                     session.current_retrieval_version_id,
-                    action_guide.source_iis_version_id,
-                    action_guide.source_iis_version_number,
-                    json.dumps(asdict(action_guide), ensure_ascii=False),
-                    action_guide.raw_text,
-                    f"Action guide version {action_guide.version}",
+                    software_requirements.source_iis_version_id,
+                    software_requirements.source_iis_version_number,
+                    json.dumps(asdict(software_requirements), ensure_ascii=False),
+                    software_requirements.raw_text,
+                    f"Software requirements version {software_requirements.version}",
                     created_at,
                 ),
             )
@@ -455,17 +455,17 @@ class SessionStore:
                     json.dumps(
                         {
                             "draft_version_id": version_id,
-                            "version_number": action_guide.version,
-                            "artifact_type": "action_guide",
-                            "source_iis_version_id": action_guide.source_iis_version_id,
-                            "source_iis_version_number": action_guide.source_iis_version_number,
+                            "version_number": software_requirements.version,
+                            "artifact_type": "software_requirements",
+                            "source_iis_version_id": software_requirements.source_iis_version_id,
+                            "source_iis_version_number": software_requirements.source_iis_version_number,
                         }
                     ),
                     created_at,
                 ),
             )
             self._connection.commit()
-        session.current_action_guide_version_id = version_id
+        session.current_software_requirements_version_id = version_id
         return version_id
 
     def save_user_event(self, session_id: str, event_type: str, actor: str, payload: dict) -> None:
@@ -495,7 +495,11 @@ class SessionStore:
             DraftVersionRecord(
                 id=row["id"],
                 version_number=row["version_number"],
-                artifact_type=row["artifact_type"],
+                artifact_type=(
+                    "software_requirements"
+                    if row["artifact_type"] == "action_guide"
+                    else row["artifact_type"]
+                ),
                 source_type=row["source_type"],
                 retrieval_version_id=row["retrieval_version_id"],
                 source_iis_version_id=row["source_iis_version_id"],
@@ -509,7 +513,7 @@ class SessionStore:
 
     def restore_draft_version(
         self, session: Session, version_id: int
-    ) -> tuple[WhatToDoDraft | ImplementationActionGuide, int, str]:
+    ) -> tuple[WhatToDoDraft | SoftwareRequirementsDraft, int, str]:
         with self._lock:
             row = self._connection.execute(
                 """
@@ -525,17 +529,24 @@ class SessionStore:
 
         payload = json.loads(row["draft_json"])
         artifact_type = row["artifact_type"]
-        if artifact_type == "action_guide":
-            restored_guide = ImplementationActionGuide(**payload)
-            restored_guide.version = self._next_draft_version_number(session.id, artifact_type)
-            new_version_id = self.save_action_guide_version(
+        if artifact_type in ("software_requirements", "action_guide"):
+            restored_requirements = SoftwareRequirementsDraft(
+                version=int(payload.get("version", 1)),
+                requirements=[str(item) for item in payload.get("requirements", [])],
+                traceability_summary=[str(item) for item in payload.get("traceability_summary", [])],
+                raw_text=str(payload.get("raw_text", "")),
+                source_iis_version_id=row["source_iis_version_id"],
+                source_iis_version_number=row["source_iis_version_number"],
+            )
+            restored_requirements.version = self._next_draft_version_number(session.id, "software_requirements")
+            new_version_id = self.save_software_requirements_version(
                 session,
-                restored_guide,
+                restored_requirements,
                 source_type="restore_version",
             )
-            session.action_guide = restored_guide
-            session.action_guide_history.append(restored_guide)
-            return restored_guide, new_version_id, artifact_type
+            session.software_requirements = restored_requirements
+            session.software_requirements_history.append(restored_requirements)
+            return restored_requirements, new_version_id, "software_requirements"
 
         restored_draft = WhatToDoDraft(**payload)
         restored_draft.version = self._next_draft_version_number(session.id, artifact_type)
@@ -562,12 +573,22 @@ class SessionStore:
 
     def _next_draft_version_number(self, session_id: str, artifact_type: str = "iis") -> int:
         with self._lock:
-            row = self._connection.execute(
-                """
-                SELECT COALESCE(MAX(version_number), 0) AS max_version
-                FROM draft_versions
-                WHERE session_id = ? AND artifact_type = ?
-                """,
-                (session_id, artifact_type),
-            ).fetchone()
+            if artifact_type == "software_requirements":
+                row = self._connection.execute(
+                    """
+                    SELECT COALESCE(MAX(version_number), 0) AS max_version
+                    FROM draft_versions
+                    WHERE session_id = ? AND artifact_type IN ('software_requirements', 'action_guide')
+                    """,
+                    (session_id,),
+                ).fetchone()
+            else:
+                row = self._connection.execute(
+                    """
+                    SELECT COALESCE(MAX(version_number), 0) AS max_version
+                    FROM draft_versions
+                    WHERE session_id = ? AND artifact_type = ?
+                    """,
+                    (session_id, artifact_type),
+                ).fetchone()
         return int(row["max_version"]) + 1
