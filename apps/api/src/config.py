@@ -76,6 +76,10 @@ DEFAULT_CODE_RAG = {
     "exclude_filename_keywords": ["test"],
     "exclude_path_keywords": [],
     "ranking_mode": "filter",
+    "file_aggregation_strategy": "max_plus_second_plus_log_count",
+    "file_aggregation_alpha": 0.25,
+    "file_aggregation_beta": 0.05,
+    "file_aggregation_candidate_multiplier": 5,
     "top_k": 20,
 }
 
@@ -122,6 +126,10 @@ class CodeRagConfig:
     exclude_filename_keywords: list[str]
     exclude_path_keywords: list[str]
     ranking_mode: str
+    file_aggregation_strategy: str
+    file_aggregation_alpha: float
+    file_aggregation_beta: float
+    file_aggregation_candidate_multiplier: int
     endpoint: str
     index_name: str
     api_key: str
@@ -256,6 +264,28 @@ def load_app_config() -> AppConfig:
                 if item.strip()
             ],
             ranking_mode=_env("CODE_RAG_RANKING_MODE", DEFAULT_CODE_RAG["ranking_mode"]),
+            file_aggregation_strategy=_env(
+                "CODE_RAG_FILE_AGGREGATION_STRATEGY",
+                DEFAULT_CODE_RAG["file_aggregation_strategy"],
+            ),
+            file_aggregation_alpha=float(
+                _env(
+                    "CODE_RAG_FILE_AGGREGATION_ALPHA",
+                    str(DEFAULT_CODE_RAG["file_aggregation_alpha"]),
+                )
+            ),
+            file_aggregation_beta=float(
+                _env(
+                    "CODE_RAG_FILE_AGGREGATION_BETA",
+                    str(DEFAULT_CODE_RAG["file_aggregation_beta"]),
+                )
+            ),
+            file_aggregation_candidate_multiplier=int(
+                _env(
+                    "CODE_RAG_FILE_AGGREGATION_CANDIDATE_MULTIPLIER",
+                    str(DEFAULT_CODE_RAG["file_aggregation_candidate_multiplier"]),
+                )
+            ),
             endpoint=_env("CODE_RAG_ENDPOINT", ""),
             index_name=_env("CODE_RAG_INDEX", ""),
             api_key=_env("CODE_RAG_API_KEY", ""),

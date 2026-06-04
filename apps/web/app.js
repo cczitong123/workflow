@@ -9,8 +9,16 @@ let currentImportedEpic = null;
 let workspaceMode = "iis_mode";
 let softwareRequirementsOutdated = false;
 let confirmedIisVersionId = null;
-let actionGuideBusy = false;
 const PANEL_STORAGE_KEY = "agentic-workflow-workspace-widths";
+const workflowBusyState = {
+  generate: false,
+  refine: false,
+  rerun: false,
+  confirm: false,
+  actionGuide: false,
+  restore: false,
+  reopen: false,
+};
 
 const jiraState = {
   hasSavedToken: false,
@@ -130,13 +138,13 @@ function setStatus({ title, message, variant = "idle", busy = false }) {
   document.getElementById("statusMessage").textContent = message;
 }
 
-function applyBusyState({ generate = false, refine = false, rerun = false, confirm = false, actionGuide = false }) {
-  document.getElementById("loadButton").disabled = generate;
-  document.getElementById("refineButton").disabled = refine;
-  document.getElementById("rerunButton").disabled = rerun;
-  document.getElementById("confirmIisButton").disabled = confirm;
-  document.getElementById("reopenIisButton").disabled = confirm;
-  document.getElementById("generateActionGuideButton").disabled = actionGuide;
+function hasActiveWorkflowRequest() {
+  return Object.values(workflowBusyState).some(Boolean);
+}
+
+function applyBusyState(nextState = {}) {
+  Object.assign(workflowBusyState, nextState);
+  updateWorkspaceModeUI();
 }
 
 function updateCurrentEpicBadge() {
@@ -157,6 +165,7 @@ function updateWorkspaceModeUI() {
   const confirmButton = document.getElementById("confirmIisButton");
   const reopenButton = document.getElementById("reopenIisButton");
   const generateActionGuideButton = document.getElementById("generateActionGuideButton");
+  const loadButton = document.getElementById("loadButton");
   const refineHeading = document.getElementById("refineHeading");
   const refineInput = document.getElementById("refineInput");
   const refineButton = document.getElementById("refineButton");
@@ -166,15 +175,29 @@ function updateWorkspaceModeUI() {
   const draftEditor = document.getElementById("draftEditor");
   const actionGuideEditor = document.getElementById("actionGuideEditor");
   const rerunButton = document.getElementById("rerunButton");
+  const isBusy = hasActiveWorkflowRequest();
+
+  loadButton.disabled = isBusy || !currentImportedEpic;
 
   refineButton.disabled =
+    isBusy ||
     !currentSessionId ||
     (workspaceMode === "software_requirements_mode" ? !currentActionGuide : !currentDraft);
-  confirmButton.disabled = !currentSessionId || !currentDraft || workspaceMode === "software_requirements_mode";
-  reopenButton.disabled = !currentSessionId || workspaceMode !== "software_requirements_mode";
-  rerunButton.disabled = !currentSessionId || workspaceMode === "software_requirements_mode";
+  confirmButton.disabled =
+    isBusy ||
+    !currentSessionId ||
+    !currentDraft ||
+    workspaceMode === "software_requirements_mode";
+  reopenButton.disabled =
+    isBusy ||
+    !currentSessionId ||
+    workspaceMode !== "software_requirements_mode";
+  rerunButton.disabled =
+    isBusy ||
+    !currentSessionId ||
+    workspaceMode === "software_requirements_mode";
   generateActionGuideButton.disabled =
-    actionGuideBusy ||
+    isBusy ||
     !currentSessionId ||
     workspaceMode !== "software_requirements_mode" ||
     !currentDraft ||
@@ -676,7 +699,7 @@ function renderVersions() {
     actions.className = "version-actions";
     const restoreButton = document.createElement("button");
     restoreButton.textContent = "Restore";
-    restoreButton.disabled = isCurrent;
+    restoreButton.disabled = isCurrent || hasActiveWorkflowRequest();
     restoreButton.addEventListener("click", () => restoreVersion(version.id));
     actions.appendChild(restoreButton);
 
@@ -791,7 +814,7 @@ async function generate() {
     return;
   }
   setStatus({ title: "In Progress", message: "Preparing session...", variant: "busy", busy: true });
-  applyBusyState({ generate: true, refine: true, rerun: true, confirm: true, actionGuide: true });
+  applyBusyState({ generate: true, refine: true, rerun: true, confirm: true, actionGuide: true, restore: true, reopen: true });
 
   try {
     const epic = epicInput.epic;
@@ -828,8 +851,7 @@ async function generate() {
     setStatus({ title: "Error", message: error.message, variant: "error", busy: false });
   } finally {
     stopStatusPolling();
-    applyBusyState({ generate: false, refine: false, rerun: false, confirm: false, actionGuide: false });
-    updateWorkspaceModeUI();
+    applyBusyState({ generate: false, refine: false, rerun: false, confirm: false, actionGuide: false, restore: false, reopen: false });
   }
 }
 
@@ -852,7 +874,7 @@ async function refine() {
     variant: "busy",
     busy: true,
   });
-  applyBusyState({ generate: true, refine: true, rerun: true, confirm: true, actionGuide: true });
+  applyBusyState({ generate: true, refine: true, rerun: true, confirm: true, actionGuide: true, restore: true, reopen: true });
   startStatusPolling(currentSessionId);
 
   try {
@@ -887,8 +909,7 @@ async function refine() {
     setStatus({ title: "Error", message: error.message, variant: "error", busy: false });
   } finally {
     stopStatusPolling();
-    applyBusyState({ generate: false, refine: false, rerun: false, confirm: false, actionGuide: false });
-    updateWorkspaceModeUI();
+    applyBusyState({ generate: false, refine: false, rerun: false, confirm: false, actionGuide: false, restore: false, reopen: false });
   }
 }
 
@@ -899,7 +920,7 @@ async function rerunRetrieval() {
   syncDraftFromEditor();
   const { userMessage, answeredQuestions } = collectRefinePayload();
   setStatus({ title: "In Progress", message: "Re-running retrieval...", variant: "busy", busy: true });
-  applyBusyState({ generate: true, refine: true, rerun: true, confirm: true, actionGuide: true });
+  applyBusyState({ generate: true, refine: true, rerun: true, confirm: true, actionGuide: true, restore: true, reopen: true });
   startStatusPolling(currentSessionId);
 
   try {
@@ -930,8 +951,7 @@ async function rerunRetrieval() {
     setStatus({ title: "Error", message: error.message, variant: "error", busy: false });
   } finally {
     stopStatusPolling();
-    applyBusyState({ generate: false, refine: false, rerun: false, confirm: false, actionGuide: false });
-    updateWorkspaceModeUI();
+    applyBusyState({ generate: false, refine: false, rerun: false, confirm: false, actionGuide: false, restore: false, reopen: false });
   }
 }
 
@@ -940,7 +960,7 @@ async function restoreVersion(versionId) {
     return;
   }
   setStatus({ title: "In Progress", message: "Restoring selected version...", variant: "busy", busy: true });
-  applyBusyState({ generate: true, refine: true, rerun: true, confirm: true, actionGuide: true });
+  applyBusyState({ generate: true, refine: true, rerun: true, confirm: true, actionGuide: true, restore: true, reopen: true });
   startStatusPolling(currentSessionId);
 
   try {
@@ -966,8 +986,7 @@ async function restoreVersion(versionId) {
     setStatus({ title: "Error", message: error.message, variant: "error", busy: false });
   } finally {
     stopStatusPolling();
-    applyBusyState({ generate: false, refine: false, rerun: false, confirm: false, actionGuide: false });
-    updateWorkspaceModeUI();
+    applyBusyState({ generate: false, refine: false, rerun: false, confirm: false, actionGuide: false, restore: false, reopen: false });
   }
 }
 
@@ -977,7 +996,7 @@ async function confirmIis() {
   }
   syncDraftFromEditor();
   setStatus({ title: "In Progress", message: "Confirming Implementation Intent Specification...", variant: "busy", busy: true });
-  applyBusyState({ generate: true, refine: true, rerun: true, confirm: true, actionGuide: true });
+  applyBusyState({ generate: true, refine: true, rerun: true, confirm: true, actionGuide: true, restore: true, reopen: true });
 
   try {
     const result = await fetchJson(`/api/sessions/${currentSessionId}/confirm-iis`, {
@@ -998,8 +1017,7 @@ async function confirmIis() {
   } catch (error) {
     setStatus({ title: "Error", message: error.message, variant: "error", busy: false });
   } finally {
-    applyBusyState({ generate: false, refine: false, rerun: false, confirm: false, actionGuide: false });
-    updateWorkspaceModeUI();
+    applyBusyState({ generate: false, refine: false, rerun: false, confirm: false, actionGuide: false, restore: false, reopen: false });
   }
 }
 
@@ -1011,9 +1029,8 @@ async function generateActionGuide() {
   if (currentActionGuide) {
     syncActionGuideFromEditor();
   }
-  actionGuideBusy = true;
   setStatus({ title: "In Progress", message: "Generating Software Requirements...", variant: "busy", busy: true });
-  applyBusyState({ generate: true, refine: true, rerun: true, confirm: true, actionGuide: true });
+  applyBusyState({ generate: true, refine: true, rerun: true, confirm: true, actionGuide: true, restore: true, reopen: true });
   startStatusPolling(currentSessionId);
 
   try {
@@ -1037,9 +1054,7 @@ async function generateActionGuide() {
     setStatus({ title: "Error", message: error.message, variant: "error", busy: false });
   } finally {
     stopStatusPolling();
-    actionGuideBusy = false;
-    applyBusyState({ generate: false, refine: false, rerun: false, confirm: false, actionGuide: false });
-    updateWorkspaceModeUI();
+    applyBusyState({ generate: false, refine: false, rerun: false, confirm: false, actionGuide: false, restore: false, reopen: false });
   }
 }
 
@@ -1048,7 +1063,7 @@ async function reopenIis() {
     return;
   }
   setStatus({ title: "In Progress", message: "Reopening Implementation Intent Specification...", variant: "busy", busy: true });
-  applyBusyState({ generate: true, refine: true, rerun: true, confirm: true, actionGuide: true });
+  applyBusyState({ generate: true, refine: true, rerun: true, confirm: true, actionGuide: true, restore: true, reopen: true });
   try {
     const result = await fetchJson(`/api/sessions/${currentSessionId}/reopen-iis`, {
       method: "POST",
@@ -1068,8 +1083,7 @@ async function reopenIis() {
   } catch (error) {
     setStatus({ title: "Error", message: error.message, variant: "error", busy: false });
   } finally {
-    applyBusyState({ generate: false, refine: false, rerun: false, confirm: false, actionGuide: false });
-    updateWorkspaceModeUI();
+    applyBusyState({ generate: false, refine: false, rerun: false, confirm: false, actionGuide: false, restore: false, reopen: false });
   }
 }
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from functools import lru_cache
 from pathlib import Path
@@ -84,8 +85,19 @@ def _retrieve_local_evidence(
     _log(f"Local query built. chars={len(query)} ranking_mode={state['ranking_mode']}")
     query_vec = _embed_text(query, state)
     _log(f"Query embedding ready. dim={len(query_vec)}")
-    results = _search_local_index(query_vec, state, query, config.top_k)
-    _log(f"Local retrieval completed. results={len(results)}")
+    raw_results = _search_local_index(
+        query_vec,
+        state,
+        query,
+        top_k=config.top_k,
+        candidate_multiplier=config.file_aggregation_candidate_multiplier,
+    )
+    _log(f"Local chunk retrieval completed. raw_results={len(raw_results)}")
+    results = _aggregate_results_by_file(raw_results, config)
+    _log(
+        "Local file-level aggregation completed. "
+        f"strategy={config.file_aggregation_strategy} results={len(results)}"
+    )
     return [_result_to_evidence(result, intent) for result in results]
 
 
@@ -121,9 +133,13 @@ def _result_to_evidence(result: dict[str, Any], intent: RetrievalIntent) -> Evid
         f"type={result.get('type')}, chunk={result.get('chunk_index')}, "
         f"lines={result.get('start_line')}-{result.get('end_line')}"
     )
+    matched_chunk_count = int(result.get("matched_chunk_count", 1))
+    file_score = float(result.get("file_score", result.get("final_score", result.get("similarity", 0.0))))
     why_relevant = (
-        f"Matched the generated retrieval intent with similarity {result['similarity']:.3f}"
+        f"Matched the generated retrieval intent with file-level score {file_score:.3f}"
     )
+    if matched_chunk_count > 1:
+        why_relevant += f" across {matched_chunk_count} retrieved chunks from the same file"
     suggested_change = (
         f"Inspect this {result.get('type') or 'code'} area for behavior related to: {intent.technical_intent}"
     )
@@ -133,7 +149,7 @@ def _result_to_evidence(result: dict[str, Any], intent: RetrievalIntent) -> Evid
         chunk_type=str(result.get("type") or "unknown"),
         symbol=result.get("name"),
         snippet=snippet,
-        score=float(result.get("final_score", result.get("similarity", 0.0))),
+        score=file_score,
         why_relevant=why_relevant,
         suggested_change=suggested_change,
         location_hint=location_hint,
@@ -155,6 +171,10 @@ def _state_cache_key(config: CodeRagConfig) -> str:
             "exclude_filename_keywords": config.exclude_filename_keywords,
             "exclude_path_keywords": config.exclude_path_keywords,
             "ranking_mode": config.ranking_mode,
+            "file_aggregation_strategy": config.file_aggregation_strategy,
+            "file_aggregation_alpha": config.file_aggregation_alpha,
+            "file_aggregation_beta": config.file_aggregation_beta,
+            "file_aggregation_candidate_multiplier": config.file_aggregation_candidate_multiplier,
             "top_k": config.top_k,
         },
         sort_keys=True,
@@ -350,12 +370,14 @@ def _search_local_index(
     state: dict[str, Any],
     query: str,
     top_k: int,
+    candidate_multiplier: int,
 ) -> list[dict[str, Any]]:
     norm_query = query_vec / np.linalg.norm(query_vec)
     ranking_mode = state["ranking_mode"].lower().strip()
     metadatas = state["metadatas"]
     vectors = state["vectors"]
     index = state["index"]
+    raw_top_k = max(top_k, top_k * max(candidate_multiplier, 1))
     _log(f"Searching local index with ranking_mode={ranking_mode}")
 
     if ranking_mode == "filter":
@@ -366,16 +388,16 @@ def _search_local_index(
             filtered_metas = [metadatas[idx] for idx in filtered_indices]
             filtered_index = _build_faiss_index_cosine(filtered_vectors)
             _log(f"Using filtered FAISS index size={filtered_vectors.shape[0]}")
-            return _query_index_cosine(filtered_index, filtered_metas, norm_query, top_k)
+            return _query_index_cosine(filtered_index, filtered_metas, norm_query, raw_top_k)
         _log("No filename-filter matches. Falling back to full FAISS index")
-        return _query_index_cosine(index, metadatas, norm_query, top_k)
+        return _query_index_cosine(index, metadatas, norm_query, raw_top_k)
 
     if ranking_mode == "weight":
-        raw_results = _query_index_cosine(index, metadatas, norm_query, top_k * 5)
+        raw_results = _query_index_cosine(index, metadatas, norm_query, raw_top_k * 5)
         _log(f"Weight mode raw results={len(raw_results)}")
-        return _weighted_ranking(raw_results, metadatas, query, state["stopwords_lang"])[:top_k]
+        return _weighted_ranking(raw_results, metadatas, query, state["stopwords_lang"])[:raw_top_k]
 
-    return _query_index_cosine(index, metadatas, norm_query, top_k)
+    return _query_index_cosine(index, metadatas, norm_query, raw_top_k)
 
 
 def _query_index_cosine(index, metadatas: list[dict[str, Any]], query_vec: np.ndarray, top_k: int) -> list[dict[str, Any]]:
@@ -471,3 +493,59 @@ def _weighted_ranking(
         result["final_score"] = alpha * result["similarity"] + beta * filename_score
     results.sort(key=lambda item: item["final_score"], reverse=True)
     return results
+
+
+def _aggregate_results_by_file(
+    results: list[dict[str, Any]],
+    config: CodeRagConfig,
+) -> list[dict[str, Any]]:
+    strategy = config.file_aggregation_strategy.lower().strip()
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for result in results:
+        file_path = str(result.get("file_path") or "").strip()
+        if not file_path:
+            continue
+        grouped.setdefault(file_path, []).append(result)
+
+    aggregated_results: list[dict[str, Any]] = []
+    for file_path, file_results in grouped.items():
+        sorted_file_results = sorted(
+            file_results,
+            key=lambda item: float(item.get("final_score", item.get("similarity", 0.0))),
+            reverse=True,
+        )
+        top_scores = [
+            float(item.get("final_score", item.get("similarity", 0.0)))
+            for item in sorted_file_results
+        ]
+        top1 = top_scores[0]
+        top2 = top_scores[1] if len(top_scores) > 1 else 0.0
+        matched_chunk_count = len(sorted_file_results)
+
+        if strategy == "max_only":
+            file_score = top1
+        elif strategy == "max_plus_second":
+            file_score = top1 + config.file_aggregation_alpha * top2
+        elif strategy == "max_plus_log_count":
+            file_score = top1 + config.file_aggregation_beta * math.log1p(matched_chunk_count)
+        elif strategy == "sum_all":
+            file_score = sum(top_scores)
+        elif strategy == "top3_weighted":
+            top3 = top_scores[:3]
+            weights = [0.6, 0.3, 0.1]
+            file_score = sum(score * weights[idx] for idx, score in enumerate(top3))
+        else:
+            file_score = (
+                top1
+                + config.file_aggregation_alpha * top2
+                + config.file_aggregation_beta * math.log1p(matched_chunk_count)
+            )
+
+        representative = dict(sorted_file_results[0])
+        representative["file_score"] = float(file_score)
+        representative["matched_chunk_count"] = matched_chunk_count
+        representative["supporting_chunk_scores"] = top_scores[:3]
+        aggregated_results.append(representative)
+
+    aggregated_results.sort(key=lambda item: float(item["file_score"]), reverse=True)
+    return aggregated_results[: config.top_k]

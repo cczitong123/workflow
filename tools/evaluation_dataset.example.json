@@ -1,0 +1,24 @@
+[
+  {
+    "case_id": "PARK-EXAMPLE-001",
+    "task_type": "modify_existing_module",
+    "difficulty": "medium",
+    "description": "Paste the full Epic description here.",
+    "historical_what_to_do": "Paste the historical what-to-do text here when available.",
+    "historical_changed_files": [
+      "components/example/src/module/example.cpp",
+      "components/example/include/module/example.h"
+    ],
+    "historical_software_requirements": [
+      {
+        "id": "SR-1",
+        "text": "The system shall ..."
+      },
+      {
+        "id": "SR-2",
+        "text": "The system shall ..."
+      }
+    ],
+    "notes": "Optional mentor notes, constraints, or assumptions."
+  }
+]

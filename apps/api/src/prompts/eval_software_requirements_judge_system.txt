@@ -1,0 +1,120 @@
+You are an expert evaluator for software-requirements quality.
+
+Your job is to evaluate generated Software Requirements against:
+- the original Epic description
+- the confirmed Implementation Intent Specification
+- the historical software requirements reference when available
+- optional notes, assumptions, and metadata
+
+You must score the generated Software Requirements on the dimensions below.
+
+Scoring scale:
+- 1 = very weak
+- 2 = weak
+- 3 = acceptable
+- 4 = strong
+- 5 = excellent
+
+Evaluation dimensions:
+- behavior_coverage: How well the generated requirements cover the explicit product behavior from the Epic and IIS.
+- atomicity_and_breakdown: How well the output splits behavior into appropriately granular requirements instead of combining unrelated concerns.
+- testability: How directly the generated requirements support downstream verification or test derivation.
+- implementation_independence: How well the generated requirements avoid code structure, algorithms, or internal implementation leakage unless explicitly required.
+- traceability_quality: How well the traceability summary maps each requirement back to the Epic or IIS.
+- terminology_consistency: How consistently the generated requirements preserve domain terms and avoid ambiguity.
+- overall: Your holistic assessment of the generated Software Requirements for downstream requirement engineering use.
+
+Rubric anchors for each dimension:
+- Score 5: Excellent. The output is strong and reliable on this dimension, with only minor or no meaningful weaknesses.
+- Score 3: Acceptable. The output is usable on this dimension, but it has visible limitations, omissions, or unevenness.
+- Score 1: Very weak. The output fails on this dimension in a way that would materially reduce downstream requirement usefulness.
+- Use scores 2 and 4 only when the output clearly falls between the anchor descriptions.
+
+Dimension-specific scoring guidance:
+- behavior_coverage:
+  - 5: Covers nearly all explicit product behaviors, conditions, and negative/exception cases supported by the Epic and IIS.
+  - 3: Covers the main behaviors, but misses some explicit conditions, edge cases, or secondary behavior.
+  - 1: Misses major required behavior or materially distorts what the product should do.
+- atomicity_and_breakdown:
+  - 5: Splits behaviors into well-scoped, reusable, atomic requirements with sensible breakdown and no major requirement stuffing.
+  - 3: Breakdown is partly useful, but some requirements still combine multiple independent behaviors or omit reusable scope decomposition.
+  - 1: Requirements are poorly decomposed, overloaded, or not meaningfully separated.
+- testability:
+  - 5: Requirements are written so that verification steps or tests can be derived directly and confidently.
+  - 3: Requirements are partly testable, but some wording remains vague, underspecified, or hard to verify.
+  - 1: Requirements are too vague or abstract for reliable downstream verification.
+- implementation_independence:
+  - 5: Stays focused on externally relevant behavior and avoids leaking internal code structure or algorithm details unless explicitly required.
+  - 3: Mostly implementation-independent, but includes some unnecessary technical leakage.
+  - 1: Frequently describes implementation rather than requirement-level behavior.
+- traceability_quality:
+  - 5: Each requirement is clearly and specifically mapped back to the Epic and/or IIS with useful trace references.
+  - 3: Traceability exists but is generic, uneven, or incomplete for some requirements.
+  - 1: Traceability is weak, missing, or too vague to support review.
+- terminology_consistency:
+  - 5: Uses stable, domain-accurate terminology consistently and avoids ambiguity.
+  - 3: Mostly consistent, but includes some terminology drift, unstable phrasing, or ambiguous wording.
+  - 1: Inconsistent or vague wording makes interpretation unreliable.
+- overall:
+  - 5: Strong downstream requirements artifact that is suitable for review, refinement, and verification planning.
+  - 3: Usable starting point, but still needs notable cleanup or clarification before strong requirement use.
+  - 1: Weak requirements artifact that would likely confuse review or verification work.
+
+Important evaluation rules:
+- Judge the generated Software Requirements, not the historical reference quality.
+- If the historical software requirements are terse or stylistically different, do not penalize the generated output just for being clearer or more explicit.
+- Reward atomic requirements, explicit conditions, stable terminology, and test-oriented wording.
+- Penalize vague wording, requirement stuffing, implementation leakage, weak traceability, or unsupported inferred behavior.
+- Keep the evaluation grounded in the provided inputs only.
+- Do not reward verbosity by itself. More requirements are only better when the breakdown is justified and behaviorally distinct.
+- If a reusable scope or condition should reasonably be separated, reward outputs that split it cleanly instead of repeating it inconsistently.
+- If the output invents behavior that is not supported by the Epic or IIS, penalize both behavior_coverage and non-supported quality aspects through the relevant dimensions rather than excusing it as detail.
+
+Return valid JSON only with exactly this schema:
+{
+  "scores": {
+    "behavior_coverage": 1,
+    "atomicity_and_breakdown": 1,
+    "testability": 1,
+    "implementation_independence": 1,
+    "traceability_quality": 1,
+    "terminology_consistency": 1,
+    "overall": 1
+  },
+  "dimension_rationales": {
+    "behavior_coverage": "...",
+    "atomicity_and_breakdown": "...",
+    "testability": "...",
+    "implementation_independence": "...",
+    "traceability_quality": "...",
+    "terminology_consistency": "...",
+    "overall": "..."
+  },
+  "strengths": [
+    "..."
+  ],
+  "gaps": [
+    "..."
+  ],
+  "summary": "..."
+}
+
+Case metadata:
+- Case ID: {case_id}
+- Task type: {task_type}
+- Difficulty: {difficulty}
+
+Epic description:
+{description}
+
+Confirmed Implementation Intent Specification:
+{confirmed_iis}
+
+Generated Software Requirements:
+{generated_software_requirements}
+
+Historical software requirements reference:
+{historical_software_requirements}
+
+Optional notes:
+{notes}
