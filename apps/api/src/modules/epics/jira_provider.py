@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Any
 
 import httpx
 
 import config as app_config_module
-from config import JiraConfig, load_app_config
+from config import JiraConfig
 from modules.epics.repository import normalize_epic_payload
 from modules.shared.models import EpicRecord
 
@@ -16,10 +15,9 @@ from modules.shared.models import EpicRecord
 class JiraEpicProvider:
     def __init__(self, config: JiraConfig) -> None:
         self.config = config
-        self._runtime_token: str | None = None
 
-    def has_saved_token(self) -> bool:
-        return bool(self._current_token())
+    def has_saved_token(self, *, token: str | None = None) -> bool:
+        return bool(token or self.config.personal_token)
 
     def validate_token(self, token: str) -> dict[str, Any]:
         return self._request_json(
@@ -29,19 +27,13 @@ class JiraEpicProvider:
         )
 
     def connect(self, token: str, remember_locally: bool) -> dict[str, Any]:
-        profile = self.validate_token(token)
-        self._runtime_token = token
-        os.environ[f"{app_config_module.ENV_PREFIX}_JIRA_PERSONAL_TOKEN"] = token
-        if remember_locally:
-            _write_env_value("AGENTIC_WORKFLOW_JIRA_PERSONAL_TOKEN", token)
-            refreshed = load_app_config()
-            self.config = refreshed.jira
-        return profile
+        return self.validate_token(token)
 
-    def list_projects(self) -> list[dict[str, Any]]:
+    def list_projects(self, *, token: str | None = None) -> list[dict[str, Any]]:
         data = self._request_json(
             "GET",
             "/rest/api/2/project",
+            token=token,
         )
         visible_keys = set(self.config.visible_project_keys)
         projects = [
@@ -55,12 +47,13 @@ class JiraEpicProvider:
         projects.sort(key=lambda item: item["key"])
         return projects[: self.config.project_list_limit]
 
-    def list_epics(self, project_key: str) -> list[dict[str, Any]]:
+    def list_epics(self, project_key: str, *, token: str | None = None) -> list[dict[str, Any]]:
         project_key = project_key.strip().upper()
         fields = ["summary", "status", "issuetype"]
         data = self._request_json(
             "GET",
             "/rest/api/2/search",
+            token=token,
             params={
                 "jql": f'project="{project_key}" AND issuetype=Epic ORDER BY key DESC',
                 "fields": ",".join(fields),
@@ -79,7 +72,7 @@ class JiraEpicProvider:
             if issue.get("key")
         ]
 
-    def get_epic(self, issue_key: str) -> EpicRecord:
+    def get_epic(self, issue_key: str, *, token: str | None = None) -> EpicRecord:
         issue_key = issue_key.strip().upper()
         fields = [
             "summary",
@@ -102,6 +95,7 @@ class JiraEpicProvider:
         payload = self._request_json(
             "GET",
             f"/rest/api/2/issue/{issue_key}",
+            token=token,
             params={"fields": ",".join(fields)},
         )
         fields_payload = payload.get("fields", {})
@@ -138,29 +132,4 @@ class JiraEpicProvider:
         return response.json()
 
     def _current_token(self) -> str:
-        if self._runtime_token:
-            return self._runtime_token
         return self.config.personal_token
-
-
-def _write_env_value(key: str, value: str) -> None:
-    env_path = app_config_module.PROJECT_ROOT / ".env"
-    lines: list[str] = []
-    if env_path.exists():
-        lines = env_path.read_text(encoding="utf-8").splitlines()
-
-    updated = False
-    new_lines: list[str] = []
-    for line in lines:
-        if line.startswith(f"{key}="):
-            new_lines.append(f"{key}={value}")
-            updated = True
-        else:
-            new_lines.append(line)
-
-    if not updated:
-        if new_lines and new_lines[-1].strip():
-            new_lines.append("")
-        new_lines.append(f"{key}={value}")
-
-    env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")

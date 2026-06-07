@@ -120,6 +120,8 @@ class RetrievalVersionRecord:
 @dataclass
 class Session:
     id: str
+    user_id: int
+    user_key: str
     epic_id: str
     input_title: str
     input_description: str

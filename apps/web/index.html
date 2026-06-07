@@ -8,14 +8,20 @@
   </head>
   <body>
     <header class="topbar">
-      <div>
+      <div class="topbar-copy">
         <h1>Epic Implementation Workbench</h1>
         <p>Offline MVP for description -> evidence -> implementation specification -> software requirements.</p>
       </div>
-      <div class="controls">
-        <div id="currentEpicBadge" class="current-epic-badge">Current Epic: None selected</div>
-        <button id="jiraImportButton" class="button-secondary">Import from Jira</button>
-        <button id="loadButton" class="button-primary">Generate IIS</button>
+      <div class="topbar-controls">
+        <div class="topbar-status-row">
+          <div id="currentEpicBadge" class="status-chip status-chip-wide is-empty">Current Epic: None selected</div>
+          <div id="workspaceUserBadge" class="status-chip status-chip-wide is-empty">Workspace: Not signed in</div>
+          <button id="signOutButton" class="button-quiet hidden">Sign out</button>
+        </div>
+        <div class="topbar-primary-row">
+          <button id="jiraImportButton" class="button-secondary button-large">Import from Jira</button>
+          <button id="loadButton" class="button-primary button-large">Generate IIS</button>
+        </div>
       </div>
     </header>
 
@@ -128,6 +134,10 @@
         <textarea id="refineInput" class="editor short" placeholder="Add reviewer guidance or answer a question to refine the current IIS..."></textarea>
         <button id="refineButton" class="button-primary">Refine IIS</button>
         <div class="secondary-section">
+          <h3>Recent Sessions</h3>
+          <ul id="recentSessionsList" class="list versions empty-state-list surface-list display-surface is-empty"></ul>
+        </div>
+        <div class="secondary-section">
           <h3>Version History</h3>
           <ul id="versionList" class="list versions empty-state-list surface-list display-surface is-empty"></ul>
         </div>
@@ -155,7 +165,7 @@
             <input id="jiraTokenInput" class="text-input" type="password" autocomplete="off" />
             <label class="checkbox-row">
               <input id="jiraRememberCheckbox" type="checkbox" />
-              <span>Remember locally on this machine</span>
+              <span>Remember in this workspace</span>
             </label>
             <div class="modal-actions">
               <button id="jiraConnectButton" class="button-primary">Connect to Jira</button>
@@ -228,6 +238,43 @@
               <button id="jiraUseEpicButton" class="button-primary">Use This Epic</button>
             </div>
           </section>
+        </div>
+      </section>
+    </div>
+
+    <div id="authModal" class="modal-backdrop auth-backdrop" aria-hidden="false">
+      <section class="modal-card auth-card" role="dialog" aria-modal="true" aria-labelledby="authModalTitle">
+        <div class="modal-header">
+          <div>
+            <h2 id="authModalTitle">Open Your Workspace</h2>
+            <p class="modal-subtitle" id="authModalSubtitle">
+              Enter your work email or employee ID and your 4-digit PIN to open your saved workspace.
+            </p>
+          </div>
+        </div>
+        <div class="auth-toggle-row">
+          <button id="authOpenModeButton" class="button-primary">Open Workspace</button>
+          <button id="authCreateModeButton" class="button-secondary">Create Workspace</button>
+        </div>
+        <div class="modal-status" id="authStatus"></div>
+        <div class="modal-body auth-body">
+          <label class="field-label" for="workspaceUserKeyInput">Work Email / Employee ID</label>
+          <input id="workspaceUserKeyInput" class="text-input" type="text" autocomplete="username" />
+
+          <div id="authCreatePinFields" class="hidden">
+            <label class="field-label" for="workspacePinCreateInput">Create 4-digit PIN</label>
+            <input id="workspacePinCreateInput" class="text-input" type="password" inputmode="numeric" maxlength="4" autocomplete="new-password" />
+            <label class="field-label" for="workspacePinConfirmInput">Confirm 4-digit PIN</label>
+            <input id="workspacePinConfirmInput" class="text-input" type="password" inputmode="numeric" maxlength="4" autocomplete="new-password" />
+          </div>
+
+          <div id="authOpenPinFields">
+            <label class="field-label" for="workspacePinInput">4-digit PIN</label>
+            <input id="workspacePinInput" class="text-input" type="password" inputmode="numeric" maxlength="4" autocomplete="current-password" />
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button id="authSubmitButton" class="button-primary">Open Workspace</button>
         </div>
       </section>
     </div>

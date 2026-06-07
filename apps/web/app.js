@@ -6,10 +6,13 @@ let currentActionGuideVersionId = null;
 let currentVersions = [];
 let activePollId = null;
 let currentImportedEpic = null;
+let currentWorkspaceUser = null;
+let recentSessions = [];
 let workspaceMode = "iis_mode";
 let softwareRequirementsOutdated = false;
 let confirmedIisVersionId = null;
 const PANEL_STORAGE_KEY = "agentic-workflow-workspace-widths";
+const WORKSPACE_USER_KEY_STORAGE = "agentic-workflow-last-user-key";
 const workflowBusyState = {
   generate: false,
   refine: false,
@@ -19,6 +22,7 @@ const workflowBusyState = {
   restore: false,
   reopen: false,
 };
+let authMode = "open";
 
 const jiraState = {
   hasSavedToken: false,
@@ -45,10 +49,22 @@ async function fetchJson(url, options = {}) {
   }
 
   if (!response.ok) {
+    if (response.status === 401) {
+      handleAuthExpired();
+    }
     const message = body?.error || `Request failed: ${response.status}`;
     throw new Error(message);
   }
   return body;
+}
+
+function handleAuthExpired() {
+  currentWorkspaceUser = null;
+  recentSessions = [];
+  resetWorkspace({ showWaiting: false });
+  renderRecentSessions();
+  updateWorkspaceBadge();
+  showAuthModal("Your workspace session expired. Enter your workspace ID and PIN to continue.");
 }
 
 function clamp(value, min, max) {
@@ -142,9 +158,116 @@ function hasActiveWorkflowRequest() {
   return Object.values(workflowBusyState).some(Boolean);
 }
 
+function setButtonBusyState(button, busy) {
+  if (!button) {
+    return;
+  }
+  button.classList.toggle("is-busy", busy);
+  button.setAttribute("aria-busy", busy ? "true" : "false");
+}
+
 function applyBusyState(nextState = {}) {
   Object.assign(workflowBusyState, nextState);
   updateWorkspaceModeUI();
+  renderVersions();
+}
+
+function showAuthModal(statusMessage = "") {
+  const modal = document.getElementById("authModal");
+  modal.classList.remove("hidden");
+  modal.setAttribute("aria-hidden", "false");
+  setAuthStatus(statusMessage, statusMessage ? "error" : "idle");
+  updateAuthModeUI();
+}
+
+function hideAuthModal() {
+  const modal = document.getElementById("authModal");
+  modal.classList.add("hidden");
+  modal.setAttribute("aria-hidden", "true");
+}
+
+function setAuthStatus(message, variant = "idle") {
+  const node = document.getElementById("authStatus");
+  node.textContent = message || "";
+  node.dataset.variant = variant;
+}
+
+function updateAuthModeUI() {
+  const openButton = document.getElementById("authOpenModeButton");
+  const createButton = document.getElementById("authCreateModeButton");
+  const submitButton = document.getElementById("authSubmitButton");
+  const subtitle = document.getElementById("authModalSubtitle");
+  const createFields = document.getElementById("authCreatePinFields");
+  const openFields = document.getElementById("authOpenPinFields");
+
+  const isCreate = authMode === "create";
+  openButton.classList.toggle("button-primary", !isCreate);
+  openButton.classList.toggle("button-secondary", isCreate);
+  createButton.classList.toggle("button-primary", isCreate);
+  createButton.classList.toggle("button-secondary", !isCreate);
+  submitButton.textContent = isCreate ? "Create Workspace" : "Open Workspace";
+  subtitle.textContent = isCreate
+    ? "Create a personal workspace with your work email or employee ID and a 4-digit PIN."
+    : "Enter your work email or employee ID and your 4-digit PIN to open your saved workspace.";
+  createFields.classList.toggle("hidden", !isCreate);
+  openFields.classList.toggle("hidden", isCreate);
+}
+
+function updateWorkspaceBadge() {
+  const badge = document.getElementById("workspaceUserBadge");
+  const signOutButton = document.getElementById("signOutButton");
+  if (!currentWorkspaceUser) {
+    badge.textContent = "Workspace: Not signed in";
+    badge.classList.add("is-empty");
+    signOutButton.classList.add("hidden");
+    return;
+  }
+  badge.textContent = `Workspace: ${currentWorkspaceUser.userKey}`;
+  badge.classList.remove("is-empty");
+  signOutButton.classList.remove("hidden");
+}
+
+function renderRecentSessions() {
+  const list = document.getElementById("recentSessionsList");
+  list.innerHTML = "";
+  if (!recentSessions.length) {
+    list.classList.remove("is-filled");
+    list.classList.add("is-empty");
+    const node = document.createElement("li");
+    node.className = "empty-state";
+    node.textContent = currentWorkspaceUser
+      ? "No sessions yet for this workspace."
+      : "Open your workspace to view recent sessions.";
+    list.appendChild(node);
+    return;
+  }
+
+  list.classList.remove("is-empty");
+  list.classList.add("is-filled");
+  recentSessions.forEach((sessionSummary) => {
+    const node = document.createElement("li");
+    const info = document.createElement("div");
+    const title = document.createElement("strong");
+    title.textContent = sessionSummary.epicId;
+    const meta = document.createElement("span");
+    meta.className = "version-meta";
+    meta.textContent = `${sessionSummary.title} • ${sessionSummary.updatedAt}`;
+    info.appendChild(title);
+    info.appendChild(meta);
+
+    const actions = document.createElement("div");
+    actions.className = "version-actions";
+    const openButton = document.createElement("button");
+    openButton.textContent = currentSessionId === sessionSummary.sessionId ? "Open" : "Open";
+    openButton.disabled = hasActiveWorkflowRequest() || currentSessionId === sessionSummary.sessionId;
+    setButtonBusyState(openButton, hasActiveWorkflowRequest());
+    openButton.addEventListener("click", () => openSession(sessionSummary.sessionId));
+    actions.appendChild(openButton);
+
+    node.appendChild(info);
+    node.appendChild(actions);
+    list.appendChild(node);
+  });
 }
 
 function updateCurrentEpicBadge() {
@@ -159,6 +282,29 @@ function updateCurrentEpicBadge() {
   badge.textContent = `Current Epic: ${currentImportedEpic.id}`;
   badge.classList.remove("is-empty");
   document.getElementById("loadButton").disabled = false;
+}
+
+function hydrateWorkspaceSession(status) {
+  currentSessionId = status.sessionId;
+  currentImportedEpic = {
+    id: status.epicId,
+    title: status.inputTitle,
+    description: status.inputDescription,
+    sourceType: status.sourceType,
+  };
+  renderDescription(status.inputDescription || "");
+  updateCurrentEpicBadge();
+  renderIntent(status.retrievalIntent || null);
+  renderEvidence(status.evidence || []);
+  renderDraft(status.draft || null);
+  renderActionGuide(status.softwareRequirements || null);
+  workspaceMode = status.mode || "iis_mode";
+  softwareRequirementsOutdated = Boolean(status.softwareRequirementsOutdated);
+  confirmedIisVersionId = status.confirmedIisVersionId ?? null;
+  currentDraftVersionId = status.currentDraftVersionId ?? null;
+  currentActionGuideVersionId = status.currentSoftwareRequirementsVersionId ?? null;
+  renderVersionMeta();
+  updateWorkspaceModeUI();
 }
 
 function updateWorkspaceModeUI() {
@@ -204,6 +350,10 @@ function updateWorkspaceModeUI() {
     currentDraftVersionId == null ||
     confirmedIisVersionId == null ||
     currentDraftVersionId !== confirmedIisVersionId;
+
+  [loadButton, refineButton, rerunButton, confirmButton, reopenButton, generateActionGuideButton].forEach((button) =>
+    setButtonBusyState(button, isBusy),
+  );
 
   if (workspaceMode === "software_requirements_mode") {
     refineHeading.textContent = "Refine Software Requirements";
@@ -665,6 +815,140 @@ async function loadVersions() {
   renderVersions();
 }
 
+async function refreshWorkspaceHome({ autoOpenMostRecent = false } = {}) {
+  if (!currentWorkspaceUser) {
+    recentSessions = [];
+    renderRecentSessions();
+    return;
+  }
+  const result = await fetchJson("/api/workspace/sessions");
+  recentSessions = result.sessions || [];
+  renderRecentSessions();
+  if (autoOpenMostRecent && !currentSessionId && recentSessions.length) {
+    await openSession(recentSessions[0].sessionId, { silent: true });
+  }
+}
+
+async function openSession(sessionId, { silent = false } = {}) {
+  if (!sessionId) {
+    return;
+  }
+  if (!silent) {
+    setStatus({ title: "In Progress", message: "Loading saved workspace session...", variant: "busy", busy: true });
+  }
+  applyBusyState({ generate: true, refine: true, rerun: true, confirm: true, actionGuide: true, restore: true, reopen: true });
+  try {
+    const status = await fetchJson(`/api/sessions/${sessionId}`);
+    hydrateWorkspaceSession(status);
+    await loadVersions();
+    renderRecentSessions();
+    setStatus({ title: "Ready", message: `Loaded saved session for ${status.epicId}.`, variant: "idle", busy: false });
+  } catch (error) {
+    setStatus({ title: "Error", message: error.message, variant: "error", busy: false });
+  } finally {
+    applyBusyState({ generate: false, refine: false, rerun: false, confirm: false, actionGuide: false, restore: false, reopen: false });
+  }
+}
+
+async function bootstrapWorkspaceAuth() {
+  const savedUserKey = window.localStorage.getItem(WORKSPACE_USER_KEY_STORAGE) || "";
+  document.getElementById("workspaceUserKeyInput").value = savedUserKey;
+  try {
+    const result = await fetchJson("/api/auth/me");
+    if (!result.authenticated) {
+      showAuthModal();
+      updateWorkspaceBadge();
+      renderRecentSessions();
+      return;
+    }
+    currentWorkspaceUser = result.user;
+    recentSessions = result.recentSessions || [];
+    updateWorkspaceBadge();
+    renderRecentSessions();
+    hideAuthModal();
+    window.localStorage.setItem(WORKSPACE_USER_KEY_STORAGE, currentWorkspaceUser.userKey);
+    if (recentSessions.length) {
+      await openSession(recentSessions[0].sessionId, { silent: true });
+    }
+  } catch (_error) {
+    showAuthModal("Open your workspace to start.");
+  }
+}
+
+async function submitWorkspaceAuth() {
+  const userKey = document.getElementById("workspaceUserKeyInput").value.trim();
+  if (!userKey) {
+    setAuthStatus("A work email or employee ID is required.", "error");
+    return;
+  }
+  const isCreate = authMode === "create";
+  const primaryPinInput = document.getElementById(isCreate ? "workspacePinCreateInput" : "workspacePinInput");
+  const confirmPinInput = document.getElementById("workspacePinConfirmInput");
+  const pin = primaryPinInput.value.trim();
+  if (!/^\d{4}$/.test(pin)) {
+    setAuthStatus("PIN must be exactly 4 digits.", "error");
+    return;
+  }
+  if (isCreate) {
+    const confirmPin = confirmPinInput.value.trim();
+    if (pin !== confirmPin) {
+      setAuthStatus("The two PIN entries do not match.", "error");
+      return;
+    }
+  }
+  setAuthStatus(isCreate ? "Creating workspace..." : "Opening workspace...", "busy");
+  document.getElementById("authSubmitButton").disabled = true;
+  try {
+    const result = await fetchJson(isCreate ? "/api/auth/register-workspace" : "/api/auth/open-workspace", {
+      method: "POST",
+      body: JSON.stringify({ userKey, pin }),
+    });
+    currentWorkspaceUser = result.user;
+    recentSessions = result.recentSessions || [];
+    window.localStorage.setItem(WORKSPACE_USER_KEY_STORAGE, currentWorkspaceUser.userKey);
+    updateWorkspaceBadge();
+    renderRecentSessions();
+    hideAuthModal();
+    document.getElementById("workspacePinInput").value = "";
+    document.getElementById("workspacePinCreateInput").value = "";
+    document.getElementById("workspacePinConfirmInput").value = "";
+    if (recentSessions.length) {
+      await openSession(recentSessions[0].sessionId, { silent: true });
+    } else {
+      resetWorkspace({ showWaiting: false });
+      setStatus({
+        title: "Ready",
+        message: "Workspace opened. Import an Epic from Jira to begin.",
+        variant: "idle",
+        busy: false,
+      });
+    }
+  } catch (error) {
+    setAuthStatus(error.message, "error");
+  } finally {
+    document.getElementById("authSubmitButton").disabled = false;
+  }
+}
+
+async function signOutWorkspace() {
+  try {
+    await fetchJson("/api/auth/logout", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  } catch (_error) {
+    // Best-effort logout.
+  }
+  currentWorkspaceUser = null;
+  recentSessions = [];
+  currentImportedEpic = null;
+  resetWorkspace({ showWaiting: false });
+  updateCurrentEpicBadge();
+  updateWorkspaceBadge();
+  renderRecentSessions();
+  showAuthModal();
+}
+
 function renderVersions() {
   const list = document.getElementById("versionList");
   list.innerHTML = "";
@@ -699,7 +983,9 @@ function renderVersions() {
     actions.className = "version-actions";
     const restoreButton = document.createElement("button");
     restoreButton.textContent = "Restore";
-    restoreButton.disabled = isCurrent || hasActiveWorkflowRequest();
+    const restoreBusy = hasActiveWorkflowRequest();
+    restoreButton.disabled = isCurrent || restoreBusy;
+    setButtonBusyState(restoreButton, restoreBusy);
     restoreButton.addEventListener("click", () => restoreVersion(version.id));
     actions.appendChild(restoreButton);
 
@@ -829,6 +1115,7 @@ async function generate() {
       body: JSON.stringify(epicInput),
     });
     currentSessionId = session.sessionId;
+    await refreshWorkspaceHome();
     startStatusPolling(currentSessionId);
 
     const generated = await fetchJson(`/api/sessions/${currentSessionId}/generate`, {
@@ -846,6 +1133,7 @@ async function generate() {
     renderVersionMeta();
     updateWorkspaceModeUI();
     await loadVersions();
+    await refreshWorkspaceHome();
     setStatus({ title: "Ready", message: "Implementation Intent Specification generated.", variant: "idle", busy: false });
   } catch (error) {
     setStatus({ title: "Error", message: error.message, variant: "error", busy: false });
@@ -895,6 +1183,7 @@ async function refine() {
     }
     renderVersionMeta();
     await loadVersions();
+    await refreshWorkspaceHome();
     document.getElementById("refineInput").value = "";
     setStatus({
       title: "Ready",
@@ -940,6 +1229,7 @@ async function rerunRetrieval() {
     renderVersionMeta();
     updateWorkspaceModeUI();
     await loadVersions();
+    await refreshWorkspaceHome();
     document.getElementById("refineInput").value = "";
     setStatus({
       title: "Ready",
@@ -981,6 +1271,7 @@ async function restoreVersion(versionId) {
     renderVersionMeta();
     updateWorkspaceModeUI();
     await loadVersions();
+    await refreshWorkspaceHome();
     setStatus({ title: "Ready", message: "Version restored.", variant: "idle", busy: false });
   } catch (error) {
     setStatus({ title: "Error", message: error.message, variant: "error", busy: false });
@@ -1013,6 +1304,7 @@ async function confirmIis() {
     renderVersionMeta();
     updateWorkspaceModeUI();
     await loadVersions();
+    await refreshWorkspaceHome();
     setStatus({ title: "Ready", message: "Implementation Intent Specification confirmed.", variant: "idle", busy: false });
   } catch (error) {
     setStatus({ title: "Error", message: error.message, variant: "error", busy: false });
@@ -1049,6 +1341,7 @@ async function generateActionGuide() {
     renderVersionMeta();
     updateWorkspaceModeUI();
     await loadVersions();
+    await refreshWorkspaceHome();
     setStatus({ title: "Ready", message: "Software Requirements generated.", variant: "idle", busy: false });
   } catch (error) {
     setStatus({ title: "Error", message: error.message, variant: "error", busy: false });
@@ -1079,6 +1372,7 @@ async function reopenIis() {
     }
     renderVersionMeta();
     updateWorkspaceModeUI();
+    await refreshWorkspaceHome();
     setStatus({ title: "Ready", message: "Implementation Intent Specification reopened for editing.", variant: "idle", busy: false });
   } catch (error) {
     setStatus({ title: "Error", message: error.message, variant: "error", busy: false });
@@ -1141,7 +1435,7 @@ async function loadJiraCredentialStatus() {
   jiraState.hasSavedToken = Boolean(result.hasSavedToken);
   jiraState.connected = jiraState.hasSavedToken;
   if (jiraState.connected) {
-    setJiraCredentialState("Connected using saved local credential.");
+    setJiraCredentialState("Connected using your saved workspace credential.");
     setJiraModalStatus("Connected to Jira.", "idle");
     setJiraFindEpicEnabled(true);
     await loadJiraProjects();
@@ -1171,7 +1465,7 @@ async function connectJira() {
     jiraState.hasSavedToken = jiraState.hasSavedToken || rememberLocally;
     setJiraCredentialState(
       rememberLocally
-        ? "Connected and saved locally for future use."
+        ? "Connected and saved in your workspace for future use."
         : "Connected using the current session credential.",
     );
     setJiraModalStatus("Connected to Jira.", "idle");
@@ -1341,6 +1635,24 @@ document.getElementById("draftEditor").addEventListener("input", () => {
 document.getElementById("actionGuideEditor").addEventListener("input", () => {
   syncActionGuideFromEditor();
 });
+document.getElementById("signOutButton").addEventListener("click", signOutWorkspace);
+document.getElementById("authOpenModeButton").addEventListener("click", () => {
+  authMode = "open";
+  setAuthStatus("", "idle");
+  updateAuthModeUI();
+});
+document.getElementById("authCreateModeButton").addEventListener("click", () => {
+  authMode = "create";
+  setAuthStatus("", "idle");
+  updateAuthModeUI();
+});
+document.getElementById("authSubmitButton").addEventListener("click", submitWorkspaceAuth);
+document.getElementById("authModal").addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    submitWorkspaceAuth();
+  }
+});
 document.getElementById("jiraImportButton").addEventListener("click", openJiraModal);
 document.getElementById("jiraModalClose").addEventListener("click", closeJiraModal);
 document.getElementById("jiraConnectButton").addEventListener("click", connectJira);
@@ -1363,5 +1675,8 @@ loadSavedPanelWidths();
 setupResizablePanels();
 resetWorkspace({ showWaiting: false });
 updateCurrentEpicBadge();
+renderRecentSessions();
+updateWorkspaceBadge();
 renderSelectedJiraEpic();
 updateWorkspaceModeUI();
+bootstrapWorkspaceAuth();

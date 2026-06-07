@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
+from http.cookies import SimpleCookie
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -262,27 +262,89 @@ def _serialize_epic_record(record) -> dict:
 
 
 class AppHandler(BaseHTTPRequestHandler):
+    def _read_auth_cookie(self) -> str | None:
+        raw_cookie = self.headers.get("Cookie", "")
+        if not raw_cookie:
+            return None
+        cookie = SimpleCookie()
+        cookie.load(raw_cookie)
+        morsel = cookie.get("aw_auth_session")
+        return morsel.value if morsel else None
+
+    def _current_user(self) -> dict | None:
+        if SESSIONS is None:
+            return None
+        return SESSIONS.get_user_for_auth_session(self._read_auth_cookie())
+
+    def _require_user(self) -> dict | None:
+        user = self._current_user()
+        if user is None:
+            self._json({"error": "Authentication required."}, status=HTTPStatus.UNAUTHORIZED)
+            return None
+        return user
+
     def do_GET(self) -> None:
+        parsed = urlparse(self.path)
+        if parsed.path == "/" or parsed.path == "/index.html":
+            self._serve_file(WEB_DIR / "index.html", "text/html; charset=utf-8")
+            return
+
+        if parsed.path == "/app.js":
+            self._serve_file(WEB_DIR / "app.js", "application/javascript; charset=utf-8")
+            return
+
+        if parsed.path == "/styles.css":
+            self._serve_file(WEB_DIR / "styles.css", "text/css; charset=utf-8")
+            return
+
         if EPICS is None or SESSIONS is None:
             self._json({"error": "Epic repository is not configured."}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
             return
-        parsed = urlparse(self.path)
+
+        if parsed.path == "/api/auth/me":
+            user = self._current_user()
+            if user is None:
+                self._json({"authenticated": False})
+                return
+            self._json(
+                {
+                    "authenticated": True,
+                    "user": {
+                        "userId": user["userId"],
+                        "userKey": user["userKey"],
+                        "hasSavedJiraToken": user["hasSavedJiraToken"],
+                    },
+                    "recentSessions": SESSIONS.list_user_sessions(int(user["userId"])),
+                }
+            )
+            return
+
+        user = self._require_user()
+        if user is None:
+            return
         if JIRA is not None and parsed.path == "/api/jira/credential-status":
-            self._json({"hasSavedToken": JIRA.has_saved_token()})
+            self._json({"hasSavedToken": SESSIONS.has_saved_jira_token(int(user["userId"]), auth_session_id=user["authSessionId"])})
             return
 
         if JIRA is not None and parsed.path == "/api/jira/projects":
-            self._json({"projects": JIRA.list_projects()})
+            token = SESSIONS.get_jira_token(user_id=int(user["userId"]), auth_session_id=user["authSessionId"])
+            self._json({"projects": JIRA.list_projects(token=token)})
             return
 
         if JIRA is not None and parsed.path.startswith("/api/jira/projects/") and parsed.path.endswith("/epics"):
             project_key = unquote(parsed.path.split("/")[-2])
-            self._json({"epics": JIRA.list_epics(project_key)})
+            token = SESSIONS.get_jira_token(user_id=int(user["userId"]), auth_session_id=user["authSessionId"])
+            self._json({"epics": JIRA.list_epics(project_key, token=token)})
             return
 
         if JIRA is not None and parsed.path.startswith("/api/jira/epics/"):
             issue_key = unquote(parsed.path.split("/")[-1])
-            self._json(_serialize_epic_record(JIRA.get_epic(issue_key)))
+            token = SESSIONS.get_jira_token(user_id=int(user["userId"]), auth_session_id=user["authSessionId"])
+            self._json(_serialize_epic_record(JIRA.get_epic(issue_key, token=token)))
+            return
+
+        if parsed.path == "/api/workspace/sessions":
+            self._json({"sessions": SESSIONS.list_user_sessions(int(user["userId"]))})
             return
 
         if parsed.path == "/api/epics":
@@ -300,7 +362,7 @@ class AppHandler(BaseHTTPRequestHandler):
 
         if parsed.path.startswith("/api/sessions/") and parsed.path.endswith("/versions"):
             session_id = parsed.path.split("/")[-2]
-            session = SESSIONS.get(session_id)
+            session = SESSIONS.get(session_id, user_id=int(user["userId"]))
             self._json(
                 {
                     "sessionId": session.id,
@@ -313,10 +375,14 @@ class AppHandler(BaseHTTPRequestHandler):
 
         if parsed.path.startswith("/api/sessions/"):
             session_id = parsed.path.split("/")[-1]
-            session = SESSIONS.get(session_id)
+            session = SESSIONS.get(session_id, user_id=int(user["userId"]))
             self._json(
                 {
                     "sessionId": session.id,
+                    "epicId": session.epic_id,
+                    "inputTitle": session.input_title,
+                    "inputDescription": session.input_description,
+                    "sourceType": session.source_type,
                     "status": session.status,
                     "currentPhase": session.current_phase,
                     "currentMessage": session.current_message,
@@ -341,19 +407,6 @@ class AppHandler(BaseHTTPRequestHandler):
                 _serialize_epic_record(record)
             )
             return
-
-        if parsed.path == "/" or parsed.path == "/index.html":
-            self._serve_file(WEB_DIR / "index.html", "text/html; charset=utf-8")
-            return
-
-        if parsed.path == "/app.js":
-            self._serve_file(WEB_DIR / "app.js", "application/javascript; charset=utf-8")
-            return
-
-        if parsed.path == "/styles.css":
-            self._serve_file(WEB_DIR / "styles.css", "text/css; charset=utf-8")
-            return
-
         self.send_error(HTTPStatus.NOT_FOUND)
 
     def do_POST(self) -> None:
@@ -365,6 +418,67 @@ class AppHandler(BaseHTTPRequestHandler):
         log_event("HTTP", f"POST {parsed.path} received")
 
         try:
+            if parsed.path == "/api/auth/register-workspace":
+                user_key = str(payload.get("userKey", "")).strip()
+                pin = str(payload.get("pin", "")).strip()
+                if not user_key:
+                    self._json({"error": "A work email or employee ID is required."}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                if not pin.isdigit() or len(pin) != 4:
+                    self._json({"error": "PIN must be exactly 4 digits."}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                workspace = SESSIONS.register_workspace(user_key, pin)
+                self._json(
+                    {
+                        "authenticated": True,
+                        "user": {
+                            "userId": workspace["userId"],
+                            "userKey": workspace["userKey"],
+                            "hasSavedJiraToken": workspace["hasSavedJiraToken"],
+                        },
+                        "recentSessions": workspace["recentSessions"],
+                    },
+                    headers={
+                        "Set-Cookie": f"aw_auth_session={workspace['authSessionId']}; HttpOnly; Path=/; SameSite=Lax"
+                    },
+                )
+                return
+
+            if parsed.path == "/api/auth/open-workspace":
+                user_key = str(payload.get("userKey", "")).strip()
+                pin = str(payload.get("pin", "")).strip()
+                if not user_key or not pin:
+                    self._json({"error": "Workspace ID and PIN are required."}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                workspace = SESSIONS.open_workspace(user_key, pin)
+                self._json(
+                    {
+                        "authenticated": True,
+                        "user": {
+                            "userId": workspace["userId"],
+                            "userKey": workspace["userKey"],
+                            "hasSavedJiraToken": workspace["hasSavedJiraToken"],
+                        },
+                        "recentSessions": workspace["recentSessions"],
+                    },
+                    headers={
+                        "Set-Cookie": f"aw_auth_session={workspace['authSessionId']}; HttpOnly; Path=/; SameSite=Lax"
+                    },
+                )
+                return
+
+            if parsed.path == "/api/auth/logout":
+                SESSIONS.close_auth_session(self._read_auth_cookie())
+                self._json(
+                    {"ok": True},
+                    headers={"Set-Cookie": "aw_auth_session=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax"},
+                )
+                return
+
+            user = self._require_user()
+            if user is None:
+                return
+
             if parsed.path == "/api/jira/connect":
                 if JIRA is None:
                     self._json({"error": "Jira provider is not configured."}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
@@ -375,6 +489,13 @@ class AppHandler(BaseHTTPRequestHandler):
                     self._json({"error": "A Jira personal token is required."}, status=HTTPStatus.BAD_REQUEST)
                     return
                 profile = JIRA.connect(token, remember_locally)
+                SESSIONS.save_jira_token(
+                    user_id=int(user["userId"]),
+                    user_key=str(user["userKey"]),
+                    auth_session_id=str(user["authSessionId"]),
+                    token=token,
+                    remember=remember_locally,
+                )
                 self._json(
                     {
                         "connected": True,
@@ -405,6 +526,8 @@ class AppHandler(BaseHTTPRequestHandler):
                     log_event("SESSION", f"Creating session for epic={epic_id}")
                     record = EPICS.get_epic(epic_id)
                 session = SESSIONS.create(
+                    user_id=int(user["userId"]),
+                    user_key=str(user["userKey"]),
                     epic_id=record.source.id,
                     title=record.source.title,
                     description=record.source.description,
@@ -426,7 +549,7 @@ class AppHandler(BaseHTTPRequestHandler):
 
             if parsed.path.endswith("/generate"):
                 session_id = parsed.path.split("/")[-2]
-                session = SESSIONS.get(session_id)
+                session = SESSIONS.get(session_id, user_id=int(user["userId"]))
                 log_event("GENERATE", f"Session {session_id} started for epic={session.epic_id}")
                 if APP_CONFIG is None:
                     self._json({"error": "Application config is not loaded."}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
@@ -548,7 +671,7 @@ class AppHandler(BaseHTTPRequestHandler):
 
             if parsed.path.endswith("/refine"):
                 session_id = parsed.path.split("/")[-2]
-                session = SESSIONS.get(session_id)
+                session = SESSIONS.get(session_id, user_id=int(user["userId"]))
                 log_event("REFINE", f"Session {session_id} refine started")
                 if APP_CONFIG is None:
                     self._json({"error": "Application config is not loaded."}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
@@ -649,7 +772,7 @@ class AppHandler(BaseHTTPRequestHandler):
 
             if parsed.path.endswith("/rerun-retrieval"):
                 session_id = parsed.path.split("/")[-2]
-                session = SESSIONS.get(session_id)
+                session = SESSIONS.get(session_id, user_id=int(user["userId"]))
                 log_event("RERUN", f"Session {session_id} retrieval rerun started")
                 if session.mode == "software_requirements_mode":
                     self._json(
@@ -767,7 +890,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 parts = parsed.path.split("/")
                 session_id = parts[-3]
                 version_id = int(parts[-1])
-                session = SESSIONS.get(session_id)
+                session = SESSIONS.get(session_id, user_id=int(user["userId"]))
                 log_event("RESTORE", f"Session {session_id} restoring version id={version_id}")
                 SESSIONS.update_runtime_state(
                     session,
@@ -826,7 +949,7 @@ class AppHandler(BaseHTTPRequestHandler):
 
             if parsed.path.endswith("/confirm"):
                 session_id = parsed.path.split("/")[-2]
-                session = SESSIONS.get(session_id)
+                session = SESSIONS.get(session_id, user_id=int(user["userId"]))
                 _sync_manual_draft_if_needed(session, payload)
                 SESSIONS.update_runtime_state(
                     session,
@@ -853,7 +976,7 @@ class AppHandler(BaseHTTPRequestHandler):
 
             if parsed.path.endswith("/confirm-iis"):
                 session_id = parsed.path.split("/")[-2]
-                session = SESSIONS.get(session_id)
+                session = SESSIONS.get(session_id, user_id=int(user["userId"]))
                 if session.draft is None or session.retrieval_intent is None:
                     self._json(
                         {"error": "Implementation Intent Specification is not ready yet."},
@@ -915,7 +1038,7 @@ class AppHandler(BaseHTTPRequestHandler):
 
             if parsed.path.endswith("/generate-software-requirements"):
                 session_id = parsed.path.split("/")[-2]
-                session = SESSIONS.get(session_id)
+                session = SESSIONS.get(session_id, user_id=int(user["userId"]))
                 if session.draft is None or session.retrieval_intent is None:
                     self._json(
                         {"error": "Implementation Intent Specification is not ready yet."},
@@ -987,7 +1110,7 @@ class AppHandler(BaseHTTPRequestHandler):
 
             if parsed.path.endswith("/reopen-iis"):
                 session_id = parsed.path.split("/")[-2]
-                session = SESSIONS.get(session_id)
+                session = SESSIONS.get(session_id, user_id=int(user["userId"]))
                 if session.draft is None:
                     self._json(
                         {"error": "Implementation Intent Specification is not ready yet."},
@@ -1023,7 +1146,8 @@ class AppHandler(BaseHTTPRequestHandler):
             if SESSIONS is not None and parsed.path.startswith("/api/sessions/"):
                 try:
                     session_id = parsed.path.split("/")[3]
-                    session = SESSIONS.get(session_id)
+                    user = self._current_user()
+                    session = SESSIONS.get(session_id, user_id=int(user["userId"])) if user else SESSIONS.get(session_id)
                     SESSIONS.update_runtime_state(
                         session,
                         status="error",
@@ -1058,11 +1182,19 @@ class AppHandler(BaseHTTPRequestHandler):
         body = self.rfile.read(content_length) if content_length else b"{}"
         return json.loads(body.decode("utf-8"))
 
-    def _json(self, payload: object, status: HTTPStatus = HTTPStatus.OK) -> None:
+    def _json(
+        self,
+        payload: object,
+        status: HTTPStatus = HTTPStatus.OK,
+        headers: dict[str, str] | None = None,
+    ) -> None:
         content = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(content)))
+        if headers:
+            for key, value in headers.items():
+                self.send_header(key, value)
         self.end_headers()
         self.wfile.write(content)
 
