@@ -76,6 +76,8 @@ DEFAULT_CODE_RAG = {
     "exclude_filename_keywords": ["test"],
     "exclude_path_keywords": [],
     "ranking_mode": "filter",
+    "ranking_alpha": 0.7,
+    "ranking_beta": 0.3,
     "file_aggregation_strategy": "max_plus_second_plus_log_count",
     "file_aggregation_alpha": 0.25,
     "file_aggregation_beta": 0.05,
@@ -126,6 +128,8 @@ class CodeRagConfig:
     exclude_filename_keywords: list[str]
     exclude_path_keywords: list[str]
     ranking_mode: str
+    ranking_alpha: float
+    ranking_beta: float
     file_aggregation_strategy: str
     file_aggregation_alpha: float
     file_aggregation_beta: float
@@ -264,6 +268,18 @@ def load_app_config() -> AppConfig:
                 if item.strip()
             ],
             ranking_mode=_env("CODE_RAG_RANKING_MODE", DEFAULT_CODE_RAG["ranking_mode"]),
+            ranking_alpha=float(
+                _env(
+                    "CODE_RAG_RANKING_ALPHA",
+                    str(DEFAULT_CODE_RAG["ranking_alpha"]),
+                )
+            ),
+            ranking_beta=float(
+                _env(
+                    "CODE_RAG_RANKING_BETA",
+                    str(DEFAULT_CODE_RAG["ranking_beta"]),
+                )
+            ),
             file_aggregation_strategy=_env(
                 "CODE_RAG_FILE_AGGREGATION_STRATEGY",
                 DEFAULT_CODE_RAG["file_aggregation_strategy"],

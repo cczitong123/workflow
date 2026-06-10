@@ -171,6 +171,8 @@ def _state_cache_key(config: CodeRagConfig) -> str:
             "exclude_filename_keywords": config.exclude_filename_keywords,
             "exclude_path_keywords": config.exclude_path_keywords,
             "ranking_mode": config.ranking_mode,
+            "ranking_alpha": config.ranking_alpha,
+            "ranking_beta": config.ranking_beta,
             "file_aggregation_strategy": config.file_aggregation_strategy,
             "file_aggregation_alpha": config.file_aggregation_alpha,
             "file_aggregation_beta": config.file_aggregation_beta,
@@ -236,6 +238,8 @@ def _get_local_rag_state(cache_key: str) -> dict[str, Any]:
         "metadatas": metadatas,
         "index": index,
         "ranking_mode": resolved["ranking_mode"],
+        "ranking_alpha": float(resolved["ranking_alpha"]),
+        "ranking_beta": float(resolved["ranking_beta"]),
     }
 
 
@@ -395,7 +399,31 @@ def _search_local_index(
     if ranking_mode == "weight":
         raw_results = _query_index_cosine(index, metadatas, norm_query, raw_top_k * 5)
         _log(f"Weight mode raw results={len(raw_results)}")
-        return _weighted_ranking(raw_results, metadatas, query, state["stopwords_lang"])[:raw_top_k]
+        return _weighted_ranking(
+            raw_results,
+            metadatas,
+            query,
+            state["stopwords_lang"],
+            alpha=state["ranking_alpha"],
+            beta=state["ranking_beta"],
+        )[:raw_top_k]
+
+    if ranking_mode == "semantic_only":
+        raw_results = _query_index_cosine(index, metadatas, norm_query, raw_top_k)
+        _log(f"Semantic-only mode raw results={len(raw_results)}")
+        return raw_results
+
+    if ranking_mode == "filename_only":
+        raw_results = _query_index_cosine(index, metadatas, norm_query, raw_top_k * 5)
+        _log(f"Filename-only mode raw results={len(raw_results)}")
+        return _weighted_ranking(
+            raw_results,
+            metadatas,
+            query,
+            state["stopwords_lang"],
+            alpha=0.0,
+            beta=1.0,
+        )[:raw_top_k]
 
     return _query_index_cosine(index, metadatas, norm_query, raw_top_k)
 

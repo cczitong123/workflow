@@ -9,6 +9,7 @@ experiments.
 """
 
 import json
+import os
 import statistics
 import sys
 from collections import defaultdict
@@ -78,6 +79,33 @@ def format_list_block(items: list[str], empty_label: str = "None provided.") -> 
     return "\n".join(f"- {item}" for item in items)
 
 
+def format_evidence_block(items: list[dict[str, Any]] | None, empty_label: str = "None provided.") -> str:
+    if not items:
+        return empty_label
+    lines: list[str] = []
+    for item in items:
+        path = str(item.get("path", "")).strip() or "unknown-path"
+        symbol = str(item.get("symbol", "")).strip()
+        why_relevant = str(item.get("why_relevant", "")).strip()
+        suggested_change = str(item.get("suggested_change", "")).strip()
+        score = item.get("score")
+
+        detail_parts = []
+        if symbol:
+            detail_parts.append(f"symbol={symbol}")
+        if isinstance(score, (int, float)):
+            detail_parts.append(f"score={score:.3f}")
+        if why_relevant:
+            detail_parts.append(f"why={why_relevant}")
+        if suggested_change:
+            detail_parts.append(f"suggested_change={suggested_change}")
+        if detail_parts:
+            lines.append(f"- {path} | " + " | ".join(detail_parts))
+        else:
+            lines.append(f"- {path}")
+    return "\n".join(lines)
+
+
 def normalize_path_for_eval(path: str) -> str:
     return str(path).strip().replace("\\", "/").lower()
 
@@ -145,6 +173,15 @@ def run_generation_pipeline(
         source_iis_version_number=iis.version,
     )
     return {
+        "retrieval_config": {
+            "ranking_mode": app_config.code_rag.ranking_mode,
+            "ranking_alpha": app_config.code_rag.ranking_alpha,
+            "ranking_beta": app_config.code_rag.ranking_beta,
+            "file_aggregation_strategy": app_config.code_rag.file_aggregation_strategy,
+            "file_aggregation_alpha": app_config.code_rag.file_aggregation_alpha,
+            "file_aggregation_beta": app_config.code_rag.file_aggregation_beta,
+            "file_aggregation_candidate_multiplier": app_config.code_rag.file_aggregation_candidate_multiplier,
+        },
         "retrieval_intent": {
             "summary": retrieval_intent_model.summary,
             "technical_intent": retrieval_intent_model.technical_intent,
@@ -181,16 +218,34 @@ def run_generation_pipeline(
 def apply_retrieval_strategy_override(
     app_config: AppConfig,
     *,
-    strategy: str,
-    alpha: float | None = None,
-    beta: float | None = None,
+    ranking_mode: str | None = None,
+    ranking_alpha: float | None = None,
+    ranking_beta: float | None = None,
+    file_aggregation_strategy: str | None = None,
+    file_aggregation_alpha: float | None = None,
+    file_aggregation_beta: float | None = None,
     candidate_multiplier: int | None = None,
 ) -> AppConfig:
     code_rag = replace(
         app_config.code_rag,
-        file_aggregation_strategy=strategy,
-        file_aggregation_alpha=alpha if alpha is not None else app_config.code_rag.file_aggregation_alpha,
-        file_aggregation_beta=beta if beta is not None else app_config.code_rag.file_aggregation_beta,
+        ranking_mode=ranking_mode if ranking_mode is not None else app_config.code_rag.ranking_mode,
+        ranking_alpha=ranking_alpha if ranking_alpha is not None else app_config.code_rag.ranking_alpha,
+        ranking_beta=ranking_beta if ranking_beta is not None else app_config.code_rag.ranking_beta,
+        file_aggregation_strategy=(
+            file_aggregation_strategy
+            if file_aggregation_strategy is not None
+            else app_config.code_rag.file_aggregation_strategy
+        ),
+        file_aggregation_alpha=(
+            file_aggregation_alpha
+            if file_aggregation_alpha is not None
+            else app_config.code_rag.file_aggregation_alpha
+        ),
+        file_aggregation_beta=(
+            file_aggregation_beta
+            if file_aggregation_beta is not None
+            else app_config.code_rag.file_aggregation_beta
+        ),
         file_aggregation_candidate_multiplier=(
             candidate_multiplier
             if candidate_multiplier is not None
@@ -198,6 +253,42 @@ def apply_retrieval_strategy_override(
         ),
     )
     return replace(app_config, code_rag=code_rag)
+
+
+def build_eval_judge_config(app_config: AppConfig):
+    base = app_config.llm_api
+
+    def override(name: str, current: str) -> str:
+        return os.getenv(f"AGENTIC_WORKFLOW_EVAL_JUDGE_{name}", current)
+
+    def override_int(name: str, current: int) -> int:
+        value = os.getenv(f"AGENTIC_WORKFLOW_EVAL_JUDGE_{name}")
+        return int(value) if value is not None and value.strip() else current
+
+    def override_float(name: str, current: float) -> float:
+        value = os.getenv(f"AGENTIC_WORKFLOW_EVAL_JUDGE_{name}")
+        return float(value) if value is not None and value.strip() else current
+
+    return replace(
+        base,
+        mode=override("MODE", base.mode),
+        endpoint=override("ENDPOINT", base.endpoint),
+        api_path=override("API_PATH", base.api_path),
+        model=override("MODEL", base.model),
+        api_key=override("API_KEY", base.api_key),
+        access_token=override("ACCESS_TOKEN", base.access_token),
+        cert_path=override("CERT_PATH", base.cert_path),
+        auth_url=override("AUTH_URL", base.auth_url),
+        client_id=override("CLIENT_ID", base.client_id),
+        client_secret=override("CLIENT_SECRET", base.client_secret),
+        timeout_seconds=override_int("TIMEOUT_SECONDS", base.timeout_seconds),
+        include_tuning_params=override("INCLUDE_TUNING_PARAMS", str(base.include_tuning_params)).lower() == "true",
+        temperature=override_float("TEMPERATURE", base.temperature),
+        max_tokens=override_int("MAX_TOKENS", base.max_tokens),
+        top_p=override_float("TOP_P", base.top_p),
+        presence_penalty=override_float("PRESENCE_PENALTY", base.presence_penalty),
+        frequency_penalty=override_float("FREQUENCY_PENALTY", base.frequency_penalty),
+    )
 
 
 def evaluate_retrieval_case(
@@ -224,6 +315,9 @@ def evaluate_retrieval_case(
             "recall_at_all": None,
             "recall_at_5": None,
             "recall_at_10": None,
+            "recall_at_20": None,
+            "precision_at_10": None,
+            "precision_at_20": None,
             "mrr": None,
             "matched_paths": [],
         }
@@ -238,6 +332,17 @@ def evaluate_retrieval_case(
     recall_at_all = len({path for path in retrieved_paths if path in historical_paths}) / len(historical_paths)
     recall_at_5 = len({path for path in retrieved_paths[:5] if path in historical_paths}) / len(historical_paths)
     recall_at_10 = len({path for path in retrieved_paths[:10] if path in historical_paths}) / len(historical_paths)
+    recall_at_20 = len({path for path in retrieved_paths[:20] if path in historical_paths}) / len(historical_paths)
+    precision_at_10 = (
+        len([path for path in retrieved_paths[:10] if path in historical_paths]) / min(10, len(retrieved_paths))
+        if retrieved_paths
+        else 0.0
+    )
+    precision_at_20 = (
+        len([path for path in retrieved_paths[:20] if path in historical_paths]) / min(20, len(retrieved_paths))
+        if retrieved_paths
+        else 0.0
+    )
     mrr = 1.0 / first_match_rank if first_match_rank is not None else 0.0
 
     return {
@@ -247,6 +352,9 @@ def evaluate_retrieval_case(
         "recall_at_all": round(recall_at_all, 3),
         "recall_at_5": round(recall_at_5, 3),
         "recall_at_10": round(recall_at_10, 3),
+        "recall_at_20": round(recall_at_20, 3),
+        "precision_at_10": round(precision_at_10, 3),
+        "precision_at_20": round(precision_at_20, 3),
         "mrr": round(mrr, 3),
         "matched_paths": matched_paths,
     }
@@ -255,21 +363,26 @@ def evaluate_retrieval_case(
 def evaluate_iis_case(
     *,
     case: dict[str, Any],
-    generated_iis_text: str,
+    candidate_label: str,
+    candidate_iis_text: str,
+    candidate_evidence: list[dict[str, Any]] | None,
     app_config: AppConfig,
 ) -> dict[str, Any]:
+    judge_config = build_eval_judge_config(app_config)
     prompt = render_prompt(
         "eval_iis_judge_system",
         case_id=str(case.get("case_id", "")),
         task_type=str(case.get("task_type", "")),
         difficulty=str(case.get("difficulty", "")),
+        candidate_label=candidate_label,
         description=str(case.get("description", "")),
-        generated_iis=generated_iis_text,
+        candidate_iis=candidate_iis_text,
+        candidate_evidence=format_evidence_block(candidate_evidence),
         historical_what_to_do=str(case.get("historical_what_to_do", "")).strip() or "None provided.",
         historical_changed_files=format_list_block(normalize_string_list(case.get("historical_changed_files"))),
         notes=str(case.get("notes", "")).strip() or "None provided.",
     )
-    raw = _call_remote_chat(prompt, app_config.llm_api)
+    raw = _call_remote_chat(prompt, judge_config)
     return json.loads(raw)
 
 
@@ -277,23 +390,26 @@ def evaluate_software_requirements_case(
     *,
     case: dict[str, Any],
     confirmed_iis_text: str,
-    generated_software_requirements_text: str,
+    candidate_label: str,
+    candidate_software_requirements_text: str,
     app_config: AppConfig,
 ) -> dict[str, Any]:
+    judge_config = build_eval_judge_config(app_config)
     prompt = render_prompt(
         "eval_software_requirements_judge_system",
         case_id=str(case.get("case_id", "")),
         task_type=str(case.get("task_type", "")),
         difficulty=str(case.get("difficulty", "")),
+        candidate_label=candidate_label,
         description=str(case.get("description", "")),
         confirmed_iis=confirmed_iis_text,
-        generated_software_requirements=generated_software_requirements_text,
+        candidate_software_requirements=candidate_software_requirements_text,
         historical_software_requirements=format_list_block(
             normalize_string_list(case.get("historical_software_requirements"))
         ),
         notes=str(case.get("notes", "")).strip() or "None provided.",
     )
-    raw = _call_remote_chat(prompt, app_config.llm_api)
+    raw = _call_remote_chat(prompt, judge_config)
     return json.loads(raw)
 
 
@@ -301,6 +417,14 @@ def aggregate_scores(case_results: list[dict[str, Any]]) -> dict[str, Any]:
     by_artifact: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     by_strategy_retrieval: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     by_strategy_artifact: dict[str, dict[str, dict[str, list[float]]]] = defaultdict(
+        lambda: defaultdict(lambda: defaultdict(list))
+    )
+    by_ranking_strategy_retrieval: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    by_file_aggregation_strategy_retrieval: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    by_ranking_strategy_artifact: dict[str, dict[str, dict[str, list[float]]]] = defaultdict(
+        lambda: defaultdict(lambda: defaultdict(list))
+    )
+    by_file_aggregation_strategy_artifact: dict[str, dict[str, dict[str, list[float]]]] = defaultdict(
         lambda: defaultdict(lambda: defaultdict(list))
     )
     by_task_type: dict[str, dict[str, dict[str, list[float]]]] = defaultdict(
@@ -315,6 +439,8 @@ def aggregate_scores(case_results: list[dict[str, Any]]) -> dict[str, Any]:
 
     for case in case_results:
         strategy = str(case.get("retrieval_strategy", "default"))
+        ranking_strategy = str(case.get("ranking_strategy", "default"))
+        file_aggregation_strategy = str(case.get("file_aggregation_strategy", "default"))
         task_type = str(case.get("task_type", "unknown"))
         difficulty = str(case.get("difficulty", "unknown"))
         retrieval_metrics = case.get("retrieval_metrics", {})
@@ -322,7 +448,14 @@ def aggregate_scores(case_results: list[dict[str, Any]]) -> dict[str, Any]:
             for metric_name, value in retrieval_metrics.items():
                 if isinstance(value, (int, float)):
                     by_strategy_retrieval[strategy][metric_name].append(float(value))
-        for artifact_name in ("iis_evaluation", "software_requirements_evaluation"):
+                    by_ranking_strategy_retrieval[ranking_strategy][metric_name].append(float(value))
+                    by_file_aggregation_strategy_retrieval[file_aggregation_strategy][metric_name].append(float(value))
+        for artifact_name in (
+            "iis_evaluation",
+            "historical_iis_baseline_evaluation",
+            "software_requirements_evaluation",
+            "historical_software_requirements_baseline_evaluation",
+        ):
             evaluation = case.get(artifact_name)
             if not evaluation:
                 continue
@@ -331,6 +464,8 @@ def aggregate_scores(case_results: list[dict[str, Any]]) -> dict[str, Any]:
                 if isinstance(value, (int, float)):
                     by_artifact[artifact_name][dimension].append(float(value))
                     by_strategy_artifact[strategy][artifact_name][dimension].append(float(value))
+                    by_ranking_strategy_artifact[ranking_strategy][artifact_name][dimension].append(float(value))
+                    by_file_aggregation_strategy_artifact[file_aggregation_strategy][artifact_name][dimension].append(float(value))
                     by_task_type[artifact_name][task_type][dimension].append(float(value))
                     by_difficulty[artifact_name][difficulty][dimension].append(float(value))
                     by_task_and_difficulty[artifact_name][f"{task_type}__{difficulty}"][dimension].append(float(value))
@@ -338,6 +473,8 @@ def aggregate_scores(case_results: list[dict[str, Any]]) -> dict[str, Any]:
     aggregate = {
         "by_artifact": {},
         "by_strategy": {},
+        "by_ranking_strategy": {},
+        "by_file_aggregation_strategy": {},
         "by_task_type": {},
         "by_difficulty": {},
         "by_task_type_and_difficulty": {},
@@ -361,6 +498,38 @@ def aggregate_scores(case_results: list[dict[str, Any]]) -> dict[str, Any]:
         aggregate["by_strategy"].setdefault(strategy, {})
         for artifact_name, dimension_map in artifact_grouping.items():
             aggregate["by_strategy"][strategy][artifact_name] = {
+                dimension: round(statistics.mean(values), 3)
+                for dimension, values in dimension_map.items()
+                if values
+            }
+
+    for strategy, metric_map in by_ranking_strategy_retrieval.items():
+        aggregate["by_ranking_strategy"].setdefault(strategy, {})
+        aggregate["by_ranking_strategy"][strategy]["retrieval_metrics"] = {
+            metric: round(statistics.mean(values), 3)
+            for metric, values in metric_map.items()
+            if values
+        }
+    for strategy, artifact_grouping in by_ranking_strategy_artifact.items():
+        aggregate["by_ranking_strategy"].setdefault(strategy, {})
+        for artifact_name, dimension_map in artifact_grouping.items():
+            aggregate["by_ranking_strategy"][strategy][artifact_name] = {
+                dimension: round(statistics.mean(values), 3)
+                for dimension, values in dimension_map.items()
+                if values
+            }
+
+    for strategy, metric_map in by_file_aggregation_strategy_retrieval.items():
+        aggregate["by_file_aggregation_strategy"].setdefault(strategy, {})
+        aggregate["by_file_aggregation_strategy"][strategy]["retrieval_metrics"] = {
+            metric: round(statistics.mean(values), 3)
+            for metric, values in metric_map.items()
+            if values
+        }
+    for strategy, artifact_grouping in by_file_aggregation_strategy_artifact.items():
+        aggregate["by_file_aggregation_strategy"].setdefault(strategy, {})
+        for artifact_name, dimension_map in artifact_grouping.items():
+            aggregate["by_file_aggregation_strategy"][strategy][artifact_name] = {
                 dimension: round(statistics.mean(values), 3)
                 for dimension, values in dimension_map.items()
                 if values
@@ -436,6 +605,98 @@ def render_markdown_summary(case_results: list[dict[str, Any]], aggregate: dict[
                 lines.append(f"| {dimension} | {value:.3f} |")
             lines.append("")
 
+    lines.append("## Aggregate Results by Ranking Strategy")
+    lines.append("")
+    for strategy, sections in sorted(aggregate.get("by_ranking_strategy", {}).items()):
+        lines.append(f"### ranking_strategy=`{strategy}`")
+        lines.append("")
+        retrieval_scores = sections.get("retrieval_metrics", {})
+        if retrieval_scores:
+            lines.append("#### Retrieval Metrics")
+            lines.append("")
+            lines.append("| Metric | Mean Value |")
+            lines.append("| --- | ---: |")
+            for metric, value in sorted(retrieval_scores.items()):
+                lines.append(f"| {metric} | {value:.3f} |")
+            lines.append("")
+        for artifact_name in ("iis_evaluation", "software_requirements_evaluation"):
+            artifact_scores = sections.get(artifact_name, {})
+            if not artifact_scores:
+                continue
+            lines.append(f"#### {artifact_name}")
+            lines.append("")
+            lines.append("| Dimension | Mean Score |")
+            lines.append("| --- | ---: |")
+            for dimension, value in sorted(artifact_scores.items()):
+                lines.append(f"| {dimension} | {value:.3f} |")
+            lines.append("")
+
+    lines.append("## Aggregate Results by File Aggregation Strategy")
+    lines.append("")
+    for strategy, sections in sorted(aggregate.get("by_file_aggregation_strategy", {}).items()):
+        lines.append(f"### file_aggregation_strategy=`{strategy}`")
+        lines.append("")
+        retrieval_scores = sections.get("retrieval_metrics", {})
+        if retrieval_scores:
+            lines.append("#### Retrieval Metrics")
+            lines.append("")
+            lines.append("| Metric | Mean Value |")
+            lines.append("| --- | ---: |")
+            for metric, value in sorted(retrieval_scores.items()):
+                lines.append(f"| {metric} | {value:.3f} |")
+            lines.append("")
+        for artifact_name in ("iis_evaluation", "software_requirements_evaluation"):
+            artifact_scores = sections.get(artifact_name, {})
+            if not artifact_scores:
+                continue
+            lines.append(f"#### {artifact_name}")
+            lines.append("")
+            lines.append("| Dimension | Mean Score |")
+            lines.append("| --- | ---: |")
+            for dimension, value in sorted(artifact_scores.items()):
+                lines.append(f"| {dimension} | {value:.3f} |")
+            lines.append("")
+
+    lines.append("## IIS vs Historical Baseline")
+    lines.append("")
+    lines.append("| Strategy | Generated IIS Overall | Historical IIS Overall | Delta |")
+    lines.append("| --- | ---: | ---: | ---: |")
+    for strategy, sections in sorted(aggregate.get("by_strategy", {}).items()):
+        generated_overall = sections.get("iis_evaluation", {}).get("overall")
+        historical_overall = sections.get("historical_iis_baseline_evaluation", {}).get("overall")
+        if generated_overall is None and historical_overall is None:
+            continue
+        delta = (
+            round(float(generated_overall) - float(historical_overall), 3)
+            if generated_overall is not None and historical_overall is not None
+            else ""
+        )
+        generated_text = f"{generated_overall:.3f}" if isinstance(generated_overall, (int, float)) else ""
+        historical_text = f"{historical_overall:.3f}" if isinstance(historical_overall, (int, float)) else ""
+        delta_text = f"{delta:+.3f}" if isinstance(delta, (int, float)) else ""
+        lines.append(f"| {strategy} | {generated_text} | {historical_text} | {delta_text} |")
+    lines.append("")
+
+    lines.append("## Software Requirements vs Historical Baseline")
+    lines.append("")
+    lines.append("| Strategy | Generated SQ Overall | Historical SQ Overall | Delta |")
+    lines.append("| --- | ---: | ---: | ---: |")
+    for strategy, sections in sorted(aggregate.get("by_strategy", {}).items()):
+        generated_overall = sections.get("software_requirements_evaluation", {}).get("overall")
+        historical_overall = sections.get("historical_software_requirements_baseline_evaluation", {}).get("overall")
+        if generated_overall is None and historical_overall is None:
+            continue
+        delta = (
+            round(float(generated_overall) - float(historical_overall), 3)
+            if generated_overall is not None and historical_overall is not None
+            else ""
+        )
+        generated_text = f"{generated_overall:.3f}" if isinstance(generated_overall, (int, float)) else ""
+        historical_text = f"{historical_overall:.3f}" if isinstance(historical_overall, (int, float)) else ""
+        delta_text = f"{delta:+.3f}" if isinstance(delta, (int, float)) else ""
+        lines.append(f"| {strategy} | {generated_text} | {historical_text} | {delta_text} |")
+    lines.append("")
+
     lines.append("## Aggregate Scores by Task Type and Difficulty")
     lines.append("")
     for artifact_name, groups in aggregate.get("by_task_type", {}).items():
@@ -477,14 +738,27 @@ def render_markdown_summary(case_results: list[dict[str, Any]], aggregate: dict[
 
     lines.append("## Per-Case Overview")
     lines.append("")
-    lines.append("| Case ID | Strategy | Task Type | Difficulty | Retrieval Recall@10 | IIS Overall | SQ Overall |")
-    lines.append("| --- | --- | --- | --- | ---: | ---: | ---: |")
+    lines.append("| Case ID | Ranking Strategy | File Aggregation | Strategy | Task Type | Difficulty | Recall@10 | Recall@20 | IIS Overall | Historical IIS Overall | IIS Delta | SQ Overall | Historical SQ Overall | SQ Delta |")
+    lines.append("| --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
     for case in case_results:
         iis_score = case.get("iis_evaluation", {}).get("scores", {}).get("overall", "")
+        historical_iis_score = case.get("historical_iis_baseline_evaluation", {}).get("scores", {}).get("overall", "")
         sq_score = case.get("software_requirements_evaluation", {}).get("scores", {}).get("overall", "")
+        historical_sq_score = case.get("historical_software_requirements_baseline_evaluation", {}).get("scores", {}).get("overall", "")
         retrieval_recall_at_10 = case.get("retrieval_metrics", {}).get("recall_at_10", "")
+        retrieval_recall_at_20 = case.get("retrieval_metrics", {}).get("recall_at_20", "")
+        iis_delta = (
+            round(float(iis_score) - float(historical_iis_score), 3)
+            if isinstance(iis_score, (int, float)) and isinstance(historical_iis_score, (int, float))
+            else ""
+        )
+        sq_delta = (
+            round(float(sq_score) - float(historical_sq_score), 3)
+            if isinstance(sq_score, (int, float)) and isinstance(historical_sq_score, (int, float))
+            else ""
+        )
         lines.append(
-            f"| {case.get('case_id', '')} | {case.get('retrieval_strategy', '')} | {case.get('task_type', '')} | {case.get('difficulty', '')} | {retrieval_recall_at_10} | {iis_score} | {sq_score} |"
+            f"| {case.get('case_id', '')} | {case.get('ranking_strategy', '')} | {case.get('file_aggregation_strategy', '')} | {case.get('retrieval_strategy', '')} | {case.get('task_type', '')} | {case.get('difficulty', '')} | {retrieval_recall_at_10} | {retrieval_recall_at_20} | {iis_score} | {historical_iis_score} | {iis_delta} | {sq_score} | {historical_sq_score} | {sq_delta} |"
         )
 
     return "\n".join(lines) + "\n"
