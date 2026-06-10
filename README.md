@@ -215,6 +215,26 @@ The current default runtime shape is:
 
 The runtime behavior is controlled in `/apps/api/src/config.py` and can be overridden through `/.env`.
 
+### Generation LLM vs evaluation judge LLM
+
+The main application generation flow currently uses the `AGENTIC_WORKFLOW_LLM_*` configuration for:
+
+- retrieval-intent generation
+- retrieval-query generation
+- IIS generation and refinement
+- Software Requirements generation and refinement
+
+The evaluation pipeline can optionally use a different model configuration for LLM-as-judge scoring. These judge-specific overrides use:
+
+- `AGENTIC_WORKFLOW_EVAL_JUDGE_*`
+
+If no `AGENTIC_WORKFLOW_EVAL_JUDGE_*` values are set, the evaluation judge automatically falls back to the main `AGENTIC_WORKFLOW_LLM_*` configuration.
+
+This means the current behavior is:
+
+- application generation: always uses `AGENTIC_WORKFLOW_LLM_*`
+- evaluation judge: uses `AGENTIC_WORKFLOW_EVAL_JUDGE_*` when provided, otherwise reuses `AGENTIC_WORKFLOW_LLM_*`
+
 ## Where to change what
 
 ### Secrets and machine-specific values
