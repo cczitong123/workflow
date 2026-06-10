@@ -32,7 +32,15 @@ from modules.integrations.llm_adapter import (  # noqa: E402
     generate_draft,
     generate_software_requirements,
 )
-from modules.shared.models import RetrievalIntent  # noqa: E402
+from modules.shared.models import (  # noqa: E402
+    EvidenceItem,
+    FileChange,
+    OpenQuestion,
+    RetrievalIntent,
+    SoftwareRequirementsDraft,
+    Step,
+    WhatToDoDraft,
+)
 from prompt_loader import render_prompt  # noqa: E402
 
 
@@ -145,26 +153,228 @@ def render_software_requirements_text(software_requirements: dict[str, Any]) -> 
     return "\n".join(sections)
 
 
-def run_generation_pipeline(
-    description: str,
-    app_config: AppConfig,
+def build_retrieval_config_snapshot(app_config: AppConfig) -> dict[str, Any]:
+    return {
+        "ranking_mode": app_config.code_rag.ranking_mode,
+        "ranking_alpha": app_config.code_rag.ranking_alpha,
+        "ranking_beta": app_config.code_rag.ranking_beta,
+        "file_aggregation_strategy": app_config.code_rag.file_aggregation_strategy,
+        "file_aggregation_alpha": app_config.code_rag.file_aggregation_alpha,
+        "file_aggregation_beta": app_config.code_rag.file_aggregation_beta,
+        "file_aggregation_candidate_multiplier": app_config.code_rag.file_aggregation_candidate_multiplier,
+    }
+
+
+def serialize_retrieval_intent(intent: RetrievalIntent) -> dict[str, Any]:
+    return {
+        "summary": intent.summary,
+        "technical_intent": intent.technical_intent,
+        "keywords": intent.keywords,
+        "suspected_areas": intent.suspected_areas,
+        "query": intent.query,
+    }
+
+
+def deserialize_retrieval_intent(payload: dict[str, Any]) -> RetrievalIntent:
+    return RetrievalIntent(
+        summary=str(payload.get("summary", "")),
+        technical_intent=str(payload.get("technical_intent", "")),
+        keywords=[str(item) for item in payload.get("keywords", [])],
+        suspected_areas=[str(item) for item in payload.get("suspected_areas", [])],
+        query=str(payload.get("query", "")),
+    )
+
+
+def serialize_evidence_items(items: list[EvidenceItem]) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": item.id,
+            "path": item.path,
+            "chunk_type": item.chunk_type,
+            "symbol": item.symbol,
+            "snippet": item.snippet,
+            "score": item.score,
+            "why_relevant": item.why_relevant,
+            "suggested_change": item.suggested_change,
+            "location_hint": item.location_hint,
+        }
+        for item in items
+    ]
+
+
+def deserialize_evidence_items(items: list[dict[str, Any]] | None) -> list[EvidenceItem]:
+    if not items:
+        return []
+    return [
+        EvidenceItem(
+            id=str(item.get("id", "")),
+            path=str(item.get("path", "")),
+            chunk_type=str(item.get("chunk_type", "")),
+            symbol=str(item.get("symbol")) if item.get("symbol") is not None else None,
+            snippet=str(item.get("snippet", "")),
+            score=float(item.get("score", 0.0)),
+            why_relevant=str(item.get("why_relevant", "")),
+            suggested_change=str(item.get("suggested_change", "")),
+            location_hint=(
+                str(item.get("location_hint"))
+                if item.get("location_hint") is not None
+                else None
+            ),
+        )
+        for item in items
+    ]
+
+
+def serialize_iis_draft(draft: WhatToDoDraft) -> dict[str, Any]:
+    return {
+        "version": draft.version,
+        "steps": [
+            {
+                "condition": step.condition,
+                "actions": step.actions,
+            }
+            for step in draft.steps
+        ],
+        "files_to_change": [
+            {
+                "path": item.path,
+                "reason": item.reason,
+            }
+            for item in draft.files_to_change
+        ],
+        "open_questions": [
+            {
+                "id": item.id,
+                "question": item.question,
+                "reason": item.reason,
+                "status": item.status,
+                "answer": item.answer,
+            }
+            for item in draft.open_questions
+        ],
+        "raw_text": draft.raw_text,
+        "summary": draft.summary,
+    }
+
+
+def deserialize_iis_draft(payload: dict[str, Any]) -> WhatToDoDraft:
+    return WhatToDoDraft(
+        version=int(payload.get("version", 1)),
+        steps=[
+            Step(
+                condition=str(item.get("condition", "")),
+                actions=[str(action) for action in item.get("actions", [])],
+            )
+            for item in payload.get("steps", [])
+        ],
+        files_to_change=[
+            FileChange(
+                path=str(item.get("path", "")),
+                reason=str(item.get("reason", "")),
+            )
+            for item in payload.get("files_to_change", [])
+        ],
+        open_questions=[
+            OpenQuestion(
+                id=str(item.get("id", "")),
+                question=str(item.get("question", "")),
+                reason=str(item.get("reason", "")),
+                status=str(item.get("status", "open")),
+                answer=(
+                    str(item.get("answer")) if item.get("answer") is not None else None
+                ),
+            )
+            for item in payload.get("open_questions", [])
+        ],
+        raw_text=str(payload.get("raw_text", "")),
+        summary=str(payload.get("summary", "")),
+    )
+
+
+def serialize_software_requirements_draft(
+    software_requirements: SoftwareRequirementsDraft,
 ) -> dict[str, Any]:
+    return {
+        "version": software_requirements.version,
+        "requirements": software_requirements.requirements,
+        "traceability_summary": software_requirements.traceability_summary,
+        "raw_text": software_requirements.raw_text,
+        "source_iis_version_id": software_requirements.source_iis_version_id,
+        "source_iis_version_number": software_requirements.source_iis_version_number,
+    }
+
+
+def render_historical_software_requirements_text(
+    historical_software_requirements: Any,
+) -> str:
+    if not historical_software_requirements:
+        return ""
+    return "\n".join(
+        [
+            "## Software Requirements",
+            "",
+            *[
+                f"- {str(item.get('id', '')).strip()}: {str(item.get('text', '')).strip()}".strip(": ")
+                if isinstance(item, dict)
+                else f"- {str(item).strip()}"
+                for item in historical_software_requirements
+                if (
+                    isinstance(item, dict)
+                    and (
+                        str(item.get("id", "")).strip()
+                        or str(item.get("text", "")).strip()
+                    )
+                )
+                or (not isinstance(item, dict) and str(item).strip())
+            ],
+            "",
+            "## Traceability Summary",
+            "",
+        ]
+    ).strip()
+
+
+def generate_retrieval_intent_payload(description: str, app_config: AppConfig) -> dict[str, Any]:
     summary, technical_intent, keywords, suspected_areas, query = build_retrieval_intent(
         description,
         app_config.llm_api,
     )
-    retrieval_intent_model = RetrievalIntent(
-        summary=summary,
-        technical_intent=technical_intent,
-        keywords=keywords,
-        suspected_areas=suspected_areas,
-        query=query,
+    return serialize_retrieval_intent(
+        RetrievalIntent(
+            summary=summary,
+            technical_intent=technical_intent,
+            keywords=keywords,
+            suspected_areas=suspected_areas,
+            query=query,
+        )
     )
-    evidence_items = retrieve_code_evidence(
-        retrieval_intent_model,
-        app_config.code_rag,
-    )
-    iis = generate_draft(description, evidence_items, [], app_config.llm_api)
+
+
+def retrieve_evidence_payload(
+    retrieval_intent_payload: dict[str, Any],
+    app_config: AppConfig,
+) -> list[dict[str, Any]]:
+    retrieval_intent_model = deserialize_retrieval_intent(retrieval_intent_payload)
+    evidence_items = retrieve_code_evidence(retrieval_intent_model, app_config.code_rag)
+    return serialize_evidence_items(evidence_items)
+
+
+def generate_iis_payload(
+    description: str,
+    evidence_payload: list[dict[str, Any]],
+    app_config: AppConfig,
+) -> dict[str, Any]:
+    evidence_items = deserialize_evidence_items(evidence_payload)
+    draft = generate_draft(description, evidence_items, [], app_config.llm_api)
+    return serialize_iis_draft(draft)
+
+
+def generate_software_requirements_payload(
+    description: str,
+    iis_payload: dict[str, Any],
+    app_config: AppConfig,
+) -> dict[str, Any]:
+    iis = deserialize_iis_draft(iis_payload)
     software_requirements = generate_software_requirements(
         description,
         iis,
@@ -172,46 +382,27 @@ def run_generation_pipeline(
         source_iis_version_id=None,
         source_iis_version_number=iis.version,
     )
+    return serialize_software_requirements_draft(software_requirements)
+
+
+def run_generation_pipeline(
+    description: str,
+    app_config: AppConfig,
+) -> dict[str, Any]:
+    retrieval_intent = generate_retrieval_intent_payload(description, app_config)
+    evidence = retrieve_evidence_payload(retrieval_intent, app_config)
+    iis = generate_iis_payload(description, evidence, app_config)
+    software_requirements = generate_software_requirements_payload(
+        description,
+        iis,
+        app_config,
+    )
     return {
-        "retrieval_config": {
-            "ranking_mode": app_config.code_rag.ranking_mode,
-            "ranking_alpha": app_config.code_rag.ranking_alpha,
-            "ranking_beta": app_config.code_rag.ranking_beta,
-            "file_aggregation_strategy": app_config.code_rag.file_aggregation_strategy,
-            "file_aggregation_alpha": app_config.code_rag.file_aggregation_alpha,
-            "file_aggregation_beta": app_config.code_rag.file_aggregation_beta,
-            "file_aggregation_candidate_multiplier": app_config.code_rag.file_aggregation_candidate_multiplier,
-        },
-        "retrieval_intent": {
-            "summary": retrieval_intent_model.summary,
-            "technical_intent": retrieval_intent_model.technical_intent,
-            "keywords": retrieval_intent_model.keywords,
-            "suspected_areas": retrieval_intent_model.suspected_areas,
-            "query": retrieval_intent_model.query,
-        },
-        "evidence": [
-            {
-                "path": item.path,
-                "score": item.score,
-                "symbol": item.symbol,
-                "why_relevant": item.why_relevant,
-                "suggested_change": item.suggested_change,
-                "location_hint": item.location_hint,
-            }
-            for item in evidence_items
-        ],
-        "iis": {
-            "version": iis.version,
-            "raw_text": iis.raw_text,
-            "summary": iis.summary,
-        },
-        "software_requirements": {
-            "version": software_requirements.version,
-            "requirements": software_requirements.requirements,
-            "traceability_summary": software_requirements.traceability_summary,
-            "raw_text": software_requirements.raw_text,
-            "source_iis_version_number": software_requirements.source_iis_version_number,
-        },
+        "retrieval_config": build_retrieval_config_snapshot(app_config),
+        "retrieval_intent": retrieval_intent,
+        "evidence": evidence,
+        "iis": iis,
+        "software_requirements": software_requirements,
     }
 
 
