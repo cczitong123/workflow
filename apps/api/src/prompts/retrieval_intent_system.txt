@@ -11,6 +11,10 @@ Output JSON only with this schema:
 Rules:
 - Focus on the implementation intent behind the Epic.
 - Preserve important domain terms from the Epic.
+- keywords must be atomic retrieval tokens, not multi-word phrases.
+- split phrase-like concepts into separate keyword entries.
+- do not output keywords containing spaces such as "ama reply" or "lq abort"; instead output ["ama", "reply"] or ["lq", "abort"].
+- prefer short filename-search-friendly tokens such as abbreviations, signal names, module names, status names, and function stems.
 - suspected_areas should be hypotheses that help code retrieval, not guarantees.
 - Do not output markdown fences.
 - Do not output explanations outside the JSON.

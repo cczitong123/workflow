@@ -25,6 +25,23 @@ def _log(message: str) -> None:
 _TOKEN_CACHE: dict[str, dict[str, float | str]] = {}
 
 
+def _normalize_retrieval_keywords(items: list[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        raw = str(item).strip()
+        if not raw:
+            continue
+        for token in re.findall(r"[A-Za-z0-9_]+", raw.lower()):
+            if len(token) < 2:
+                continue
+            if token in seen:
+                continue
+            seen.add(token)
+            normalized.append(token)
+    return normalized
+
+
 def build_retrieval_intent(description: str, config: LlmApiConfig) -> tuple[str, str, list[str], list[str], str]:
     mode = config.mode.lower().strip()
     _log(f"build_retrieval_intent mode={mode}")
@@ -263,7 +280,7 @@ def _build_remote_intent(description: str, config: LlmApiConfig) -> tuple[str, s
     data = _parse_json_response(payload)
     summary = str(data.get("summary", ""))
     technical_intent = str(data.get("technical_intent", ""))
-    keywords = [str(item) for item in data.get("keywords", [])]
+    keywords = _normalize_retrieval_keywords([str(item) for item in data.get("keywords", [])])
     suspected_areas = [str(item) for item in data.get("suspected_areas", [])]
 
     _log("Rendering retrieval_query_system prompt")
