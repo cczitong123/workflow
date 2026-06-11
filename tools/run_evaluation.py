@@ -15,6 +15,7 @@ This script can:
 - export detailed JSON and a Markdown summary
 """
 
+import hashlib
 import re
 import time
 from datetime import datetime, timezone
@@ -29,6 +30,13 @@ from evaluation_utils import (
     generate_iis_payload,
     generate_retrieval_intent_payload,
     generate_software_requirements_payload,
+    get_case_historical_changed_files,
+    get_case_description,
+    get_case_difficulty,
+    get_case_historical_software_requirements,
+    get_case_historical_what_to_do,
+    get_case_id,
+    get_case_task_type,
     render_historical_software_requirements_text,
     load_eval_config,
     load_json,
@@ -118,7 +126,7 @@ CHECKPOINT_DIR = OUTPUT_DIR / "checkpoints"
 
 
 def _should_keep_case(case: dict[str, object]) -> bool:
-    case_id = str(case.get("case_id", ""))
+    case_id = _resolve_case_id(case)
     if CASE_IDS and case_id not in CASE_IDS:
         return False
     return True
@@ -161,18 +169,41 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _description_preview(text: str, limit: int = 120) -> str:
+    normalized = " ".join(str(text).split())
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: limit - 3].rstrip() + "..."
+
+
+def _resolve_case_id(case: dict[str, object]) -> str:
+    for key in ("case_id", "epic_id", "issue_key", "epic_key", "key", "id"):
+        value = str(case.get(key, "")).strip()
+        if value and value.lower() not in {"unknown", "unknown-case", "none"}:
+            return value
+    description = " ".join(str(case.get("description", "")).split()).strip()
+    if description:
+        digest = hashlib.sha1(description.encode("utf-8")).hexdigest()[:10].upper()
+        return f"CASE-{digest}"
+    return "CASE-NO-DESCRIPTION"
+
+
 def _checkpoint_path(strategy_name: str, case_id: str) -> object:
     return CHECKPOINT_DIR / _slugify(strategy_name) / f"{_slugify(case_id)}.json"
 
 
 def _build_base_case_result(case: dict[str, object], strategy_name: str, ranking_name: str, file_aggregation_name: str) -> dict[str, object]:
+    case_id = _resolve_case_id(case)
+    description_preview = _description_preview(get_case_description(case))
     return {
-        "case_id": str(case.get("case_id", "unknown-case")),
+        "case_id": case_id,
+        "case_label": f"{case_id} | {description_preview}" if description_preview else case_id,
+        "description_preview": description_preview,
         "retrieval_strategy": strategy_name,
         "ranking_strategy": ranking_name,
         "file_aggregation_strategy": file_aggregation_name,
-        "task_type": case.get("task_type", ""),
-        "difficulty": case.get("difficulty", ""),
+        "task_type": get_case_task_type(case),
+        "difficulty": get_case_difficulty(case),
         "generation": {},
     }
 
@@ -185,7 +216,7 @@ def _build_base_checkpoint(
     file_aggregation_name: str,
 ) -> dict[str, object]:
     return {
-        "case_id": str(case.get("case_id", "unknown-case")),
+        "case_id": _resolve_case_id(case),
         "strategy_name": strategy_name,
         "ranking_strategy": ranking_name,
         "file_aggregation_strategy": file_aggregation_name,
@@ -235,6 +266,76 @@ def _write_run_outputs(results: list[dict[str, object]]) -> None:
     write_markdown(OUTPUT_DIR / "evaluation_summary.md", render_markdown_summary(results, aggregate))
 
 
+def _looks_like_code_path(value: str) -> bool:
+    text = value.strip()
+    if not text or " " in text:
+        return False
+    if "/" not in text and "\\" not in text:
+        return False
+    return bool(re.search(r"\.[A-Za-z0-9_+-]+$", text))
+
+
+def _print_dataset_sanity_check(cases: list[dict[str, object]]) -> None:
+    total_cases = len(cases)
+    with_explicit_id = 0
+    with_files = 0
+    with_what_to_do = 0
+    with_srs = 0
+    with_task_type = 0
+    with_difficulty = 0
+    suspicious_file_cases: list[tuple[str, list[str]]] = []
+
+    for case in cases:
+        case_id = _resolve_case_id(case)
+        explicit_id = get_case_id(case)
+        if explicit_id:
+            with_explicit_id += 1
+
+        files = get_case_historical_changed_files(case)
+        if files:
+            with_files += 1
+            suspicious_lines = [path for path in files if not _looks_like_code_path(path)]
+            if suspicious_lines:
+                suspicious_file_cases.append((case_id, suspicious_lines[:3]))
+
+        if get_case_historical_what_to_do(case):
+            with_what_to_do += 1
+        if get_case_historical_software_requirements(case):
+            with_srs += 1
+        if get_case_task_type(case):
+            with_task_type += 1
+        if get_case_difficulty(case):
+            with_difficulty += 1
+
+    print("[EVAL][sanity] Dataset sanity check", flush=True)
+    print(f"[EVAL][sanity] total_cases={total_cases}", flush=True)
+    print(
+        f"[EVAL][sanity] explicit_ids={with_explicit_id}/{total_cases} | "
+        f"files={with_files}/{total_cases} | "
+        f"what_to_do={with_what_to_do}/{total_cases} | "
+        f"srs={with_srs}/{total_cases}",
+        flush=True,
+    )
+    print(
+        f"[EVAL][sanity] task_type={with_task_type}/{total_cases} | "
+        f"difficulty={with_difficulty}/{total_cases}",
+        flush=True,
+    )
+
+    if suspicious_file_cases:
+        preview_count = min(len(suspicious_file_cases), 10)
+        print(
+            f"[EVAL][sanity][warn] {len(suspicious_file_cases)} case(s) contain file lines "
+            f"that do not look like code paths. Showing first {preview_count}:",
+            flush=True,
+        )
+        for case_id, samples in suspicious_file_cases[:preview_count]:
+            joined = " | ".join(samples)
+            print(f"[EVAL][sanity][warn] {case_id}: {joined}", flush=True)
+    else:
+        print("[EVAL][sanity] No suspicious file lines detected.", flush=True)
+
+
 def main() -> None:
     app_config = load_eval_config()
     dataset = load_json(DATASET_PATH)
@@ -244,6 +345,7 @@ def main() -> None:
     cases = [case for case in dataset if isinstance(case, dict) and _should_keep_case(case)]
     if MAX_CASES is not None:
         cases = cases[:MAX_CASES]
+    _print_dataset_sanity_check(cases)
 
     results: list[dict[str, object]] = []
     total_cases = len(cases)
@@ -302,7 +404,7 @@ def main() -> None:
         )
 
         for case_index, case in enumerate(cases, start=1):
-            case_id = str(case.get("case_id", "unknown-case"))
+            case_id = _resolve_case_id(case)
             case_started_at = time.perf_counter()
             checkpoint_path = _checkpoint_path(strategy_name, case_id)
             checkpoint = (
@@ -379,7 +481,7 @@ def main() -> None:
                             total_strategies=total_strategies,
                         )
                         generation["retrieval_intent"] = generate_retrieval_intent_payload(
-                            str(case.get("description", "")),
+                            get_case_description(case),
                             strategy_app_config,
                         )
                         _mark_stage(checkpoint, stage_name="retrieval_intent", status="completed")
@@ -415,7 +517,7 @@ def main() -> None:
                             total_strategies=total_strategies,
                         )
                         generation["iis"] = generate_iis_payload(
-                            str(case.get("description", "")),
+                            get_case_description(case),
                             generation["evidence"],
                             strategy_app_config,
                         )
@@ -434,7 +536,7 @@ def main() -> None:
                             total_strategies=total_strategies,
                         )
                         generation["software_requirements"] = generate_software_requirements_payload(
-                            str(case.get("description", "")),
+                            get_case_description(case),
                             generation["iis"],
                             strategy_app_config,
                         )
@@ -510,7 +612,7 @@ def main() -> None:
                     _mark_stage(checkpoint, stage_name="generated_iis_evaluation", status="completed")
                     _save_checkpoint(checkpoint_path, checkpoint)
 
-                historical_what_to_do = str(case.get("historical_what_to_do", "")).strip()
+                historical_what_to_do = get_case_historical_what_to_do(case)
                 if (
                     EVALUATE_IIS
                     and historical_what_to_do
@@ -562,7 +664,7 @@ def main() -> None:
                     _save_checkpoint(checkpoint_path, checkpoint)
 
                 historical_software_requirements_text = render_historical_software_requirements_text(
-                    case.get("historical_software_requirements")
+                    get_case_historical_software_requirements(case)
                 )
                 if (
                     EVALUATE_SOFTWARE_REQUIREMENTS

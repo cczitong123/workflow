@@ -10,6 +10,7 @@ experiments.
 
 import json
 import os
+import re
 import statistics
 import sys
 from collections import defaultdict
@@ -65,7 +66,16 @@ def normalize_string_list(value: Any) -> list[str]:
         return []
     if isinstance(value, str):
         stripped = value.strip()
-        return [stripped] if stripped else []
+        if not stripped:
+            return []
+        if "\n" in stripped:
+            results = []
+            for line in stripped.splitlines():
+                normalized = re.sub(r"^\s*(?:[-*]|\d+[.)])\s*", "", line).strip()
+                if normalized:
+                    results.append(normalized)
+            return results
+        return [stripped]
     if isinstance(value, list):
         results = []
         for item in value:
@@ -79,6 +89,83 @@ def normalize_string_list(value: Any) -> list[str]:
                     results.append(text)
         return results
     return [str(value).strip()] if str(value).strip() else []
+
+
+def get_case_id(case: dict[str, Any]) -> str:
+    for key in ("case_id", "id", "epic_id", "issue_key", "epic_key", "key"):
+        value = str(case.get(key, "")).strip()
+        if value:
+            return value
+    return ""
+
+
+def get_case_description(case: dict[str, Any]) -> str:
+    return str(case.get("description", "")).strip()
+
+
+def get_case_historical_what_to_do(case: dict[str, Any]) -> str:
+    for key in ("historical_what_to_do", "what_to_do"):
+        value = str(case.get(key, "")).strip()
+        if value:
+            return value
+    return ""
+
+
+def get_case_historical_changed_files(case: dict[str, Any]) -> list[str]:
+    for key in ("historical_changed_files", "files"):
+        if key not in case:
+            continue
+        parsed = normalize_string_list(case.get(key))
+        if parsed:
+            return parsed
+    return []
+
+
+def get_case_historical_software_requirements(case: dict[str, Any]) -> list[str]:
+    raw = case.get("historical_software_requirements")
+    if raw:
+        parsed = normalize_string_list(raw)
+        if parsed:
+            return parsed
+
+    raw_srs = case.get("SRs")
+    if isinstance(raw_srs, list):
+        return normalize_string_list(raw_srs)
+    if not isinstance(raw_srs, str):
+        return []
+
+    text = raw_srs.strip()
+    if not text:
+        return []
+
+    matches = list(re.finditer(r"(?m)^\s*(\d+)[.)]\s*", text))
+    if not matches:
+        return normalize_string_list(text)
+
+    items: list[str] = []
+    for index, match in enumerate(matches):
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        item = " ".join(text[start:end].split()).strip()
+        if item:
+            items.append(item)
+    return items
+
+
+def get_case_task_type(case: dict[str, Any]) -> str:
+    for key in ("task_type", "TaskType", "taskType", "type"):
+        value = str(case.get(key, "")).strip()
+        if value:
+            return value
+    return ""
+
+
+def get_case_difficulty(case: dict[str, Any]) -> str:
+    for key in ("difficulty", "Difficulty", "Tag", "tag"):
+        value = str(case.get(key, "")).strip()
+        if value:
+            return value
+    return ""
 
 
 def format_list_block(items: list[str], empty_label: str = "None provided.") -> str:
@@ -489,7 +576,7 @@ def evaluate_retrieval_case(
 ) -> dict[str, Any]:
     historical_paths = {
         normalize_path_for_eval(path)
-        for path in normalize_string_list(case.get("historical_changed_files"))
+        for path in get_case_historical_changed_files(case)
         if normalize_path_for_eval(path)
     }
     retrieved_paths = [
@@ -562,15 +649,15 @@ def evaluate_iis_case(
     judge_config = build_eval_judge_config(app_config)
     prompt = render_prompt(
         "eval_iis_judge_system",
-        case_id=str(case.get("case_id", "")),
-        task_type=str(case.get("task_type", "")),
-        difficulty=str(case.get("difficulty", "")),
+        case_id=get_case_id(case),
+        task_type=get_case_task_type(case),
+        difficulty=get_case_difficulty(case),
         candidate_label=candidate_label,
-        description=str(case.get("description", "")),
+        description=get_case_description(case),
         candidate_iis=candidate_iis_text,
         candidate_evidence=format_evidence_block(candidate_evidence),
-        historical_what_to_do=str(case.get("historical_what_to_do", "")).strip() or "None provided.",
-        historical_changed_files=format_list_block(normalize_string_list(case.get("historical_changed_files"))),
+        historical_what_to_do=get_case_historical_what_to_do(case) or "None provided.",
+        historical_changed_files=format_list_block(get_case_historical_changed_files(case)),
         notes=str(case.get("notes", "")).strip() or "None provided.",
     )
     raw = _call_remote_chat(prompt, judge_config)
@@ -588,16 +675,14 @@ def evaluate_software_requirements_case(
     judge_config = build_eval_judge_config(app_config)
     prompt = render_prompt(
         "eval_software_requirements_judge_system",
-        case_id=str(case.get("case_id", "")),
-        task_type=str(case.get("task_type", "")),
-        difficulty=str(case.get("difficulty", "")),
+        case_id=get_case_id(case),
+        task_type=get_case_task_type(case),
+        difficulty=get_case_difficulty(case),
         candidate_label=candidate_label,
-        description=str(case.get("description", "")),
+        description=get_case_description(case),
         confirmed_iis=confirmed_iis_text,
         candidate_software_requirements=candidate_software_requirements_text,
-        historical_software_requirements=format_list_block(
-            normalize_string_list(case.get("historical_software_requirements"))
-        ),
+        historical_software_requirements=format_list_block(get_case_historical_software_requirements(case)),
         notes=str(case.get("notes", "")).strip() or "None provided.",
     )
     raw = _call_remote_chat(prompt, judge_config)
@@ -758,6 +843,22 @@ def aggregate_scores(case_results: list[dict[str, Any]]) -> dict[str, Any]:
 
 def render_markdown_summary(case_results: list[dict[str, Any]], aggregate: dict[str, Any]) -> str:
     lines = ["# Evaluation Summary", ""]
+
+    lines.append("## Case Reference")
+    lines.append("")
+    lines.append("| Case ID | Case Preview | Task Type | Difficulty |")
+    lines.append("| --- | --- | --- | --- |")
+    seen_case_ids: set[str] = set()
+    for case in case_results:
+        case_id = str(case.get("case_id", "")).strip()
+        if not case_id or case_id in seen_case_ids:
+            continue
+        seen_case_ids.add(case_id)
+        description_preview = str(case.get("description_preview", "")).replace("\n", " ").strip()
+        task_type = str(case.get("task_type", "")).strip()
+        difficulty = str(case.get("difficulty", "")).strip()
+        lines.append(f"| {case_id} | {description_preview} | {task_type} | {difficulty} |")
+    lines.append("")
 
     lines.append("## Aggregate Scores by Artifact")
     lines.append("")
@@ -929,8 +1030,8 @@ def render_markdown_summary(case_results: list[dict[str, Any]], aggregate: dict[
 
     lines.append("## Per-Case Overview")
     lines.append("")
-    lines.append("| Case ID | Ranking Strategy | File Aggregation | Strategy | Task Type | Difficulty | Recall@10 | Recall@20 | IIS Overall | Historical IIS Overall | IIS Delta | SQ Overall | Historical SQ Overall | SQ Delta |")
-    lines.append("| --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
+    lines.append("| Case ID | Case Preview | Ranking Strategy | File Aggregation | Strategy | Task Type | Difficulty | Recall@10 | Recall@20 | IIS Overall | Historical IIS Overall | IIS Delta | SQ Overall | Historical SQ Overall | SQ Delta |")
+    lines.append("| --- | --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
     for case in case_results:
         iis_score = case.get("iis_evaluation", {}).get("scores", {}).get("overall", "")
         historical_iis_score = case.get("historical_iis_baseline_evaluation", {}).get("scores", {}).get("overall", "")
@@ -938,6 +1039,7 @@ def render_markdown_summary(case_results: list[dict[str, Any]], aggregate: dict[
         historical_sq_score = case.get("historical_software_requirements_baseline_evaluation", {}).get("scores", {}).get("overall", "")
         retrieval_recall_at_10 = case.get("retrieval_metrics", {}).get("recall_at_10", "")
         retrieval_recall_at_20 = case.get("retrieval_metrics", {}).get("recall_at_20", "")
+        description_preview = str(case.get("description_preview", "")).replace("\n", " ").strip()
         iis_delta = (
             round(float(iis_score) - float(historical_iis_score), 3)
             if isinstance(iis_score, (int, float)) and isinstance(historical_iis_score, (int, float))
@@ -949,7 +1051,7 @@ def render_markdown_summary(case_results: list[dict[str, Any]], aggregate: dict[
             else ""
         )
         lines.append(
-            f"| {case.get('case_id', '')} | {case.get('ranking_strategy', '')} | {case.get('file_aggregation_strategy', '')} | {case.get('retrieval_strategy', '')} | {case.get('task_type', '')} | {case.get('difficulty', '')} | {retrieval_recall_at_10} | {retrieval_recall_at_20} | {iis_score} | {historical_iis_score} | {iis_delta} | {sq_score} | {historical_sq_score} | {sq_delta} |"
+            f"| {case.get('case_id', '')} | {description_preview} | {case.get('ranking_strategy', '')} | {case.get('file_aggregation_strategy', '')} | {case.get('retrieval_strategy', '')} | {case.get('task_type', '')} | {case.get('difficulty', '')} | {retrieval_recall_at_10} | {retrieval_recall_at_20} | {iis_score} | {historical_iis_score} | {iis_delta} | {sq_score} | {historical_sq_score} | {sq_delta} |"
         )
 
     return "\n".join(lines) + "\n"
