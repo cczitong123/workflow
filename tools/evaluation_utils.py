@@ -560,6 +560,11 @@ def build_eval_judge_config(app_config: AppConfig):
         client_id=override("CLIENT_ID", base.client_id),
         client_secret=override("CLIENT_SECRET", base.client_secret),
         timeout_seconds=override_int("TIMEOUT_SECONDS", base.timeout_seconds),
+        max_retries=override_int("MAX_RETRIES", base.max_retries),
+        retry_backoff_seconds=override_float(
+            "RETRY_BACKOFF_SECONDS",
+            base.retry_backoff_seconds,
+        ),
         include_tuning_params=override("INCLUDE_TUNING_PARAMS", str(base.include_tuning_params)).lower() == "true",
         temperature=override_float("TEMPERATURE", base.temperature),
         max_tokens=override_int("MAX_TOKENS", base.max_tokens),

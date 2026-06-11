@@ -258,6 +258,23 @@ Typical values changed there:
 - `AGENTIC_WORKFLOW_LLM_CERT_PATH`
 - `AGENTIC_WORKFLOW_LLM_AUTH_URL`
 - `AGENTIC_WORKFLOW_LLM_API_KEY`
+- `AGENTIC_WORKFLOW_LLM_TIMEOUT_SECONDS`
+- `AGENTIC_WORKFLOW_LLM_MAX_RETRIES`
+- `AGENTIC_WORKFLOW_LLM_RETRY_BACKOFF_SECONDS`
+
+For unstable home networks or bursty remote LLM clusters, the main application now supports automatic retry for retryable connect, timeout, DNS-resolution, and transient HTTP errors. The most useful controls are:
+
+- `AGENTIC_WORKFLOW_LLM_TIMEOUT_SECONDS`
+- `AGENTIC_WORKFLOW_LLM_MAX_RETRIES`
+- `AGENTIC_WORKFLOW_LLM_RETRY_BACKOFF_SECONDS`
+
+The evaluation judge supports the same pattern through:
+
+- `AGENTIC_WORKFLOW_EVAL_JUDGE_TIMEOUT_SECONDS`
+- `AGENTIC_WORKFLOW_EVAL_JUDGE_MAX_RETRIES`
+- `AGENTIC_WORKFLOW_EVAL_JUDGE_RETRY_BACKOFF_SECONDS`
+
+If the evaluation judge retry settings are left blank, they inherit the main `AGENTIC_WORKFLOW_LLM_*` behavior through the judge fallback configuration.
 - `AGENTIC_WORKFLOW_LLM_CLIENT_ID`
 - `AGENTIC_WORKFLOW_LLM_CLIENT_SECRET`
 

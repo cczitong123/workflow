@@ -42,6 +42,63 @@ def _normalize_retrieval_keywords(items: list[str]) -> list[str]:
     return normalized
 
 
+def _should_retry_remote_error(exc: Exception) -> bool:
+    retryable_names = {
+        "ConnectError",
+        "ReadTimeout",
+        "WriteTimeout",
+        "PoolTimeout",
+        "RemoteProtocolError",
+        "NetworkError",
+        "TimeoutException",
+    }
+    current: Exception | None = exc
+    while current is not None:
+        if type(current).__name__ in retryable_names:
+            return True
+        status_code = getattr(getattr(current, "response", None), "status_code", None)
+        if isinstance(status_code, int) and status_code in {408, 409, 425, 429, 500, 502, 503, 504}:
+            return True
+        current = current.__cause__ if isinstance(current.__cause__, Exception) else None
+    return False
+
+
+def _retry_delay_seconds(config: LlmApiConfig, attempt: int) -> float:
+    base = max(config.retry_backoff_seconds, 0.0)
+    if base == 0:
+        return 0.0
+    return base * (2 ** max(attempt - 1, 0))
+
+
+def _run_with_retries(
+    *,
+    operation_name: str,
+    config: LlmApiConfig,
+    func,
+):
+    max_attempts = max(config.max_retries, 0) + 1
+    last_exc: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            if attempt > 1:
+                _log(f"{operation_name} retry attempt {attempt}/{max_attempts}")
+            return func()
+        except Exception as exc:  # pragma: no cover - exercised via integration/runtime
+            last_exc = exc
+            if attempt >= max_attempts or not _should_retry_remote_error(exc):
+                raise
+            delay = _retry_delay_seconds(config, attempt)
+            _log(
+                f"{operation_name} failed on attempt {attempt}/{max_attempts} with "
+                f"{type(exc).__name__}: {exc}. Retrying in {delay:.1f}s."
+            )
+            if delay > 0:
+                time.sleep(delay)
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError(f"{operation_name} failed without an exception.")
+
+
 def build_retrieval_intent(description: str, config: LlmApiConfig) -> tuple[str, str, list[str], list[str], str]:
     mode = config.mode.lower().strip()
     _log(f"build_retrieval_intent mode={mode}")
@@ -539,55 +596,63 @@ def _call_remote_chat(prompt: str, config: LlmApiConfig) -> str:
         ) from exc
 
     _log("Preparing remote chat call")
-    access_token = config.access_token or _get_access_token(config, httpx)
-    url = f"{config.endpoint.rstrip('/')}{config.api_path}"
-    _log(f"Remote endpoint ready url={url} model={config.model}")
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "x-apikey": config.api_key,
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": config.model,
-        "messages": [{"role": "user", "content": prompt}],
-    }
-    if config.include_tuning_params:
-        payload.update(
-            {
-                "temperature": config.temperature,
-                "max_tokens": config.max_tokens,
-                "top_p": config.top_p,
-                "presence_penalty": config.presence_penalty,
-                "frequency_penalty": config.frequency_penalty,
-            }
-        )
-    client_kwargs = {"timeout": config.timeout_seconds}
-    if config.cert_path:
-        client_kwargs["verify"] = config.cert_path
 
-    _log(f"Request URL={url}")
-    _log(f"Request headers keys={list(headers.keys())}")
-    _log(f"x-apikey length={len(config.api_key) if config.api_key else 0}")
-    _log(f"Payload keys={list(payload.keys())}")
+    def _send_request() -> str:
+        access_token = config.access_token or _get_access_token(config, httpx)
+        url = f"{config.endpoint.rstrip('/')}{config.api_path}"
+        _log(f"Remote endpoint ready url={url} model={config.model}")
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "x-apikey": config.api_key,
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": config.model,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        if config.include_tuning_params:
+            payload.update(
+                {
+                    "temperature": config.temperature,
+                    "max_tokens": config.max_tokens,
+                    "top_p": config.top_p,
+                    "presence_penalty": config.presence_penalty,
+                    "frequency_penalty": config.frequency_penalty,
+                }
+            )
+        client_kwargs = {"timeout": config.timeout_seconds}
+        if config.cert_path:
+            client_kwargs["verify"] = config.cert_path
 
-    with httpx.Client(**client_kwargs) as client:
-        _log("Sending remote chat request")
-        response = client.post(url, headers=headers, json=payload)
-        _log(f"Remote chat response status={response.status_code}")
-        _log(f"Remote chat response headers={dict(response.headers)}")
+        _log(f"Request URL={url}")
+        _log(f"Request headers keys={list(headers.keys())}")
+        _log(f"x-apikey length={len(config.api_key) if config.api_key else 0}")
+        _log(f"Payload keys={list(payload.keys())}")
+
+        with httpx.Client(**client_kwargs) as client:
+            _log("Sending remote chat request")
+            response = client.post(url, headers=headers, json=payload)
+            _log(f"Remote chat response status={response.status_code}")
+            _log(f"Remote chat response headers={dict(response.headers)}")
+            try:
+                body = response.json()
+                _log(f"Remote chat response body(JSON)={json.dumps(body, ensure_ascii=False)[:4000]}")
+            except Exception:
+                body = None
+                _log(f"Remote chat response body(raw)={response.text[:4000]}")
+            response.raise_for_status()
+        if body is None:
+            raise RuntimeError("Remote LLM response body is not valid JSON.")
         try:
-            body = response.json()
-            _log(f"Remote chat response body(JSON)={json.dumps(body, ensure_ascii=False)[:4000]}")
-        except Exception:
-            body = None
-            _log(f"Remote chat response body(raw)={response.text[:4000]}")
-        response.raise_for_status()
-    if body is None:
-        raise RuntimeError("Remote LLM response body is not valid JSON.")
-    try:
-        return body["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError(f"Unexpected LLM response shape: {body}") from exc
+            return body["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise RuntimeError(f"Unexpected LLM response shape: {body}") from exc
+
+    return _run_with_retries(
+        operation_name="remote_chat_request",
+        config=config,
+        func=_send_request,
+    )
 
 
 def _get_access_token(config: LlmApiConfig, httpx_module) -> str:
@@ -615,29 +680,36 @@ def _get_access_token(config: LlmApiConfig, httpx_module) -> str:
     if config.cert_path:
         client_kwargs["verify"] = config.cert_path
 
-    with httpx_module.Client(**client_kwargs) as client:
-        response = client.post(config.auth_url, headers=headers, data=data)
-        _log(f"M2M token response status={response.status_code}")
-        try:
-            response_body = response.json()
-            _log(f"M2M token body(JSON)={json.dumps(response_body, ensure_ascii=False)[:4000]}")
-        except Exception:
-            response_body = None
-            _log(f"M2M token body(raw)={response.text[:4000]}")
-        response.raise_for_status()
-        if response_body is None:
-            raise RuntimeError("M2M token response is not valid JSON.")
-        token = response_body.get("access_token")
-    if not token:
-        raise RuntimeError("Empty access_token from M2M auth response.")
-    expires_in = int(response_body.get("expires_in", 0) or 0)
-    expires_at = now + max(expires_in - 60, 60)
-    _TOKEN_CACHE[cache_key] = {
-        "token": str(token),
-        "expires_at": float(expires_at),
-    }
-    _log("M2M token acquired successfully")
-    return token
+    def _fetch_token() -> str:
+        with httpx_module.Client(**client_kwargs) as client:
+            response = client.post(config.auth_url, headers=headers, data=data)
+            _log(f"M2M token response status={response.status_code}")
+            try:
+                response_body = response.json()
+                _log(f"M2M token body(JSON)={json.dumps(response_body, ensure_ascii=False)[:4000]}")
+            except Exception:
+                response_body = None
+                _log(f"M2M token body(raw)={response.text[:4000]}")
+            response.raise_for_status()
+            if response_body is None:
+                raise RuntimeError("M2M token response is not valid JSON.")
+            token = response_body.get("access_token")
+            if not token:
+                raise RuntimeError("Empty access_token from M2M auth response.")
+            expires_in = int(response_body.get("expires_in", 0) or 0)
+        expires_at = now + max(expires_in - 60, 60)
+        _TOKEN_CACHE[cache_key] = {
+            "token": str(token),
+            "expires_at": float(expires_at),
+        }
+        _log("M2M token acquired successfully")
+        return str(token)
+
+    return _run_with_retries(
+        operation_name="m2m_token_request",
+        config=config,
+        func=_fetch_token,
+    )
 
 
 def _parse_json_response(text: str) -> dict:

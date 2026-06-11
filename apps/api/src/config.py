@@ -99,6 +99,8 @@ DEFAULT_LLM = {
     "client_id": "",
     "client_secret": "",
     "timeout_seconds": 60,
+    "max_retries": 3,
+    "retry_backoff_seconds": 2.0,
     "include_tuning_params": False,
     "temperature": 0.2,
     "max_tokens": 1200,
@@ -156,6 +158,8 @@ class LlmApiConfig:
     client_id: str
     client_secret: str
     timeout_seconds: int
+    max_retries: int
+    retry_backoff_seconds: float
     include_tuning_params: bool
     temperature: float
     max_tokens: int
@@ -327,6 +331,13 @@ def load_app_config() -> AppConfig:
             client_id=_env("LLM_CLIENT_ID", DEFAULT_LLM["client_id"]),
             client_secret=_env("LLM_CLIENT_SECRET", DEFAULT_LLM["client_secret"]),
             timeout_seconds=int(_env("LLM_TIMEOUT_SECONDS", str(DEFAULT_LLM["timeout_seconds"]))),
+            max_retries=int(_env("LLM_MAX_RETRIES", str(DEFAULT_LLM["max_retries"]))),
+            retry_backoff_seconds=float(
+                _env(
+                    "LLM_RETRY_BACKOFF_SECONDS",
+                    str(DEFAULT_LLM["retry_backoff_seconds"]),
+                )
+            ),
             include_tuning_params=_env(
                 "LLM_INCLUDE_TUNING_PARAMS",
                 str(DEFAULT_LLM["include_tuning_params"]).lower(),
