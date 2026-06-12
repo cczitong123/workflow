@@ -244,6 +244,63 @@ def _mean(values: list[float]) -> float | None:
     return round(sum(values) / len(values), 3) if values else None
 
 
+def _top_retrieved_files_by_case(
+    results: list[dict[str, Any]],
+    *,
+    limit: int = 10,
+) -> dict[str, dict[str, Any]]:
+    grouped: dict[str, dict[str, Any]] = {}
+    for result in results:
+        case_id = str(result.get("case_id", "")).strip()
+        if not case_id:
+            continue
+        bucket = grouped.setdefault(
+            case_id,
+            {
+                "case_id": case_id,
+                "description_preview": str(result.get("description_preview", "")).strip(),
+                "task_type": str(result.get("task_type", "")).strip(),
+                "difficulty": str(result.get("difficulty", "")).strip(),
+                "file_counts": {},
+            },
+        )
+        file_counts = bucket["file_counts"]
+        evidence = result.get("generation", {}).get("evidence", [])
+        if not isinstance(evidence, list):
+            continue
+        seen_in_strategy: set[str] = set()
+        for item in evidence:
+            path = str(item.get("path", "")).strip()
+            normalized = normalize_path_for_eval(path)
+            if not path or not normalized or normalized in seen_in_strategy:
+                continue
+            seen_in_strategy.add(normalized)
+            current = file_counts.get(normalized)
+            if current is None:
+                file_counts[normalized] = {
+                    "path": path,
+                    "count": 1,
+                }
+            else:
+                current["count"] += 1
+
+    collapsed: dict[str, dict[str, Any]] = {}
+    for case_id, payload in grouped.items():
+        file_counts = payload.pop("file_counts", {})
+        ranked = sorted(
+            file_counts.values(),
+            key=lambda item: (-int(item["count"]), str(item["path"]).lower()),
+        )[:limit]
+        collapsed[case_id] = {
+            "case_id": payload["case_id"],
+            "description_preview": payload["description_preview"],
+            "task_type": payload["task_type"],
+            "difficulty": payload["difficulty"],
+            "top_retrieved_files": ranked,
+        }
+    return collapsed
+
+
 def _aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     by_strategy: dict[str, dict[str, list[float]]] = {}
     by_ranking_strategy: dict[str, dict[str, list[float]]] = {}
@@ -294,6 +351,7 @@ def _aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         "by_strategy": collapse(by_strategy),
         "by_ranking_strategy": collapse(by_ranking_strategy),
         "by_file_aggregation_strategy": collapse(by_file_aggregation_strategy),
+        "top_retrieved_files_by_case": _top_retrieved_files_by_case(results),
     }
 
 
@@ -419,6 +477,32 @@ def _render_markdown_summary(results: list[dict[str, Any]], aggregate: dict[str,
         if not gt.get("missed_gt_paths"):
             lines.append("- None.")
         lines.append("")
+
+    lines.extend(["## Most Frequently Retrieved Files by Epic", ""])
+    top_files_by_case = aggregate.get("top_retrieved_files_by_case", {})
+    if isinstance(top_files_by_case, dict) and top_files_by_case:
+        for case_id, payload in top_files_by_case.items():
+            preview = str(payload.get("description_preview", "")).strip()
+            lines.extend([f"### {case_id}", ""])
+            if preview:
+                lines.append(f"- Case Preview: {preview}")
+            lines.append("- Top Retrieved Files Across Enabled Retrieval Strategies:")
+            lines.append("")
+            lines.extend(
+                [
+                    "| Rank | File | Mention Count |",
+                    "| ---: | --- | ---: |",
+                ]
+            )
+            for index, item in enumerate(payload.get("top_retrieved_files", []), start=1):
+                lines.append(
+                    f"| {index} | {str(item.get('path', ''))} | {int(item.get('count', 0))} |"
+                )
+            if not payload.get("top_retrieved_files"):
+                lines.append("| 1 | None retrieved. | 0 |")
+            lines.append("")
+    else:
+        lines.extend(["No retrieved-file frequency data available.", ""])
 
     return "\n".join(lines)
 
