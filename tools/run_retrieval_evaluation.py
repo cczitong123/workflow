@@ -22,6 +22,7 @@ from typing import Any
 from evaluation_utils import (
     PROJECT_ROOT,
     apply_retrieval_strategy_override,
+    build_eval_path_match_map,
     evaluate_retrieval_case,
     generate_retrieval_intent_payload,
     get_case_description,
@@ -32,6 +33,7 @@ from evaluation_utils import (
     load_eval_config,
     load_json,
     normalize_path_for_eval,
+    paths_match_for_eval,
     retrieve_evidence_payload,
     write_json,
     write_markdown,
@@ -220,22 +222,29 @@ def _compute_gt_path_breakdown(case: dict[str, object], evidence: list[dict[str,
         if normalized and normalized not in retrieved_by_normalized:
             retrieved_by_normalized[normalized] = path
 
-    matched_normalized = [
-        normalized
-        for normalized in gt_by_normalized
-        if normalized in retrieved_by_normalized
-    ]
+    match_map = build_eval_path_match_map(gt_paths_original, retrieved_paths_original)
+    matched_normalized = list(match_map.keys())
     missed_normalized = [
         normalized
         for normalized in gt_by_normalized
-        if normalized not in retrieved_by_normalized
+        if normalized not in match_map
     ]
 
     return {
         "gt_paths": gt_paths_original,
         "retrieved_paths": retrieved_paths_original,
         "matched_gt_paths": [gt_by_normalized[item] for item in matched_normalized],
-        "matched_retrieved_paths": [retrieved_by_normalized[item] for item in matched_normalized],
+        "matched_retrieved_paths": [
+            next(
+                (
+                    retrieved_path
+                    for retrieved_path in retrieved_paths_original
+                    if paths_match_for_eval(gt_by_normalized[item], retrieved_path)
+                ),
+                match_map[item],
+            )
+            for item in matched_normalized
+        ],
         "missed_gt_paths": [gt_by_normalized[item] for item in missed_normalized],
     }
 

@@ -205,6 +205,32 @@ def normalize_path_for_eval(path: str) -> str:
     return str(path).strip().replace("\\", "/").lower()
 
 
+def paths_match_for_eval(left: str, right: str) -> bool:
+    left_norm = normalize_path_for_eval(left)
+    right_norm = normalize_path_for_eval(right)
+    if not left_norm or not right_norm:
+        return False
+    if left_norm == right_norm:
+        return True
+    return left_norm.endswith("/" + right_norm) or right_norm.endswith("/" + left_norm)
+
+
+def build_eval_path_match_map(
+    historical_paths: list[str],
+    retrieved_paths: list[str],
+) -> dict[str, str]:
+    matches: dict[str, str] = {}
+    for historical_path in historical_paths:
+        historical_norm = normalize_path_for_eval(historical_path)
+        if not historical_norm:
+            continue
+        for retrieved_path in retrieved_paths:
+            if paths_match_for_eval(historical_path, retrieved_path):
+                matches[historical_norm] = normalize_path_for_eval(retrieved_path)
+                break
+    return matches
+
+
 def render_software_requirements_text(software_requirements: dict[str, Any]) -> str:
     reqs = software_requirements.get("requirements") or software_requirements.get("software_requirements") or []
     trace = software_requirements.get("traceability_summary") or []
@@ -579,15 +605,25 @@ def evaluate_retrieval_case(
     case: dict[str, Any],
     generation: dict[str, Any],
 ) -> dict[str, Any]:
+    historical_paths_original = [
+        str(path).strip()
+        for path in get_case_historical_changed_files(case)
+        if str(path).strip()
+    ]
     historical_paths = {
         normalize_path_for_eval(path)
-        for path in get_case_historical_changed_files(case)
+        for path in historical_paths_original
         if normalize_path_for_eval(path)
     }
-    retrieved_paths = [
-        normalize_path_for_eval(str(item.get("path", "")))
+    retrieved_paths_original = [
+        str(item.get("path", "")).strip()
         for item in (generation.get("evidence") or [])
-        if normalize_path_for_eval(str(item.get("path", "")))
+        if str(item.get("path", "")).strip()
+    ]
+    retrieved_paths = [
+        normalize_path_for_eval(path)
+        for path in retrieved_paths_original
+        if normalize_path_for_eval(path)
     ]
 
     if not historical_paths:
@@ -605,25 +641,26 @@ def evaluate_retrieval_case(
             "matched_paths": [],
         }
 
-    matched_paths = sorted({path for path in retrieved_paths if path in historical_paths})
+    match_map = build_eval_path_match_map(historical_paths_original, retrieved_paths_original)
+    matched_paths = sorted(match_map.keys())
     first_match_rank = None
-    for idx, path in enumerate(retrieved_paths, start=1):
-        if path in historical_paths:
+    for idx, path in enumerate(retrieved_paths_original, start=1):
+        if any(paths_match_for_eval(gt_path, path) for gt_path in historical_paths_original):
             first_match_rank = idx
             break
 
-    recall_at_all = len({path for path in retrieved_paths if path in historical_paths}) / len(historical_paths)
-    recall_at_5 = len({path for path in retrieved_paths[:5] if path in historical_paths}) / len(historical_paths)
-    recall_at_10 = len({path for path in retrieved_paths[:10] if path in historical_paths}) / len(historical_paths)
-    recall_at_20 = len({path for path in retrieved_paths[:20] if path in historical_paths}) / len(historical_paths)
+    recall_at_all = len(matched_paths) / len(historical_paths)
+    recall_at_5 = len(build_eval_path_match_map(historical_paths_original, retrieved_paths_original[:5])) / len(historical_paths)
+    recall_at_10 = len(build_eval_path_match_map(historical_paths_original, retrieved_paths_original[:10])) / len(historical_paths)
+    recall_at_20 = len(build_eval_path_match_map(historical_paths_original, retrieved_paths_original[:20])) / len(historical_paths)
     precision_at_10 = (
-        len([path for path in retrieved_paths[:10] if path in historical_paths]) / min(10, len(retrieved_paths))
-        if retrieved_paths
+        len(build_eval_path_match_map(historical_paths_original, retrieved_paths_original[:10])) / min(10, len(retrieved_paths_original))
+        if retrieved_paths_original
         else 0.0
     )
     precision_at_20 = (
-        len([path for path in retrieved_paths[:20] if path in historical_paths]) / min(20, len(retrieved_paths))
-        if retrieved_paths
+        len(build_eval_path_match_map(historical_paths_original, retrieved_paths_original[:20])) / min(20, len(retrieved_paths_original))
+        if retrieved_paths_original
         else 0.0
     )
     mrr = 1.0 / first_match_rank if first_match_rank is not None else 0.0
