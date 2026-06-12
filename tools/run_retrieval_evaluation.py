@@ -22,7 +22,7 @@ from typing import Any
 from evaluation_utils import (
     PROJECT_ROOT,
     apply_retrieval_strategy_override,
-    build_eval_path_match_map,
+    build_retrieval_path_breakdown,
     evaluate_retrieval_case,
     generate_retrieval_intent_payload,
     get_case_description,
@@ -32,8 +32,6 @@ from evaluation_utils import (
     get_case_task_type,
     load_eval_config,
     load_json,
-    normalize_path_for_eval,
-    paths_match_for_eval,
     retrieve_evidence_payload,
     write_json,
     write_markdown,
@@ -204,49 +202,14 @@ def _mark_stage(checkpoint: dict[str, object], *, stage_name: str, status: str) 
 
 
 def _compute_gt_path_breakdown(case: dict[str, object], evidence: list[dict[str, Any]]) -> dict[str, Any]:
-    gt_paths_original = [str(path).strip() for path in get_case_historical_changed_files(case) if str(path).strip()]
-    gt_by_normalized = {
-        normalize_path_for_eval(path): path
-        for path in gt_paths_original
-        if normalize_path_for_eval(path)
-    }
-
-    retrieved_paths_original = [
-        str(item.get("path", "")).strip()
-        for item in evidence
-        if str(item.get("path", "")).strip()
-    ]
-    retrieved_by_normalized: dict[str, str] = {}
-    for path in retrieved_paths_original:
-        normalized = normalize_path_for_eval(path)
-        if normalized and normalized not in retrieved_by_normalized:
-            retrieved_by_normalized[normalized] = path
-
-    match_map = build_eval_path_match_map(gt_paths_original, retrieved_paths_original)
-    matched_normalized = list(match_map.keys())
-    missed_normalized = [
-        normalized
-        for normalized in gt_by_normalized
-        if normalized not in match_map
-    ]
-
-    return {
-        "gt_paths": gt_paths_original,
-        "retrieved_paths": retrieved_paths_original,
-        "matched_gt_paths": [gt_by_normalized[item] for item in matched_normalized],
-        "matched_retrieved_paths": [
-            next(
-                (
-                    retrieved_path
-                    for retrieved_path in retrieved_paths_original
-                    if paths_match_for_eval(gt_by_normalized[item], retrieved_path)
-                ),
-                match_map[item],
-            )
-            for item in matched_normalized
+    return build_retrieval_path_breakdown(
+        historical_paths=get_case_historical_changed_files(case),
+        retrieved_paths=[
+            str(item.get("path", "")).strip()
+            for item in evidence
+            if str(item.get("path", "")).strip()
         ],
-        "missed_gt_paths": [gt_by_normalized[item] for item in missed_normalized],
-    }
+    )
 
 
 def _mean(values: list[float]) -> float | None:
@@ -516,11 +479,111 @@ def _render_markdown_summary(results: list[dict[str, Any]], aggregate: dict[str,
     return "\n".join(lines)
 
 
+def _render_compact_markdown_summary(results: list[dict[str, Any]], aggregate: dict[str, Any]) -> str:
+    lines = ["# Retrieval Evaluation Compact Summary", ""]
+
+    lines.extend(
+        [
+            "## Strategy Comparison",
+            "",
+            "| Strategy | Recall@10 | Recall@20 | Precision@10 | Precision@20 | MRR | Matched GT Files | Retrieved Files |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for strategy, metrics in sorted(aggregate.get("by_strategy", {}).items()):
+        lines.append(
+            f"| {strategy} | "
+            f"{metrics.get('recall_at_10', '') if metrics.get('recall_at_10') is not None else ''} | "
+            f"{metrics.get('recall_at_20', '') if metrics.get('recall_at_20') is not None else ''} | "
+            f"{metrics.get('precision_at_10', '') if metrics.get('precision_at_10') is not None else ''} | "
+            f"{metrics.get('precision_at_20', '') if metrics.get('precision_at_20') is not None else ''} | "
+            f"{metrics.get('mrr', '') if metrics.get('mrr') is not None else ''} | "
+            f"{metrics.get('matched_changed_file_count', '') if metrics.get('matched_changed_file_count') is not None else ''} | "
+            f"{metrics.get('retrieved_file_count', '') if metrics.get('retrieved_file_count') is not None else ''} |"
+        )
+
+    lines.extend(["", "## Ranking Strategy Comparison", ""])
+    lines.extend(
+        [
+            "| Ranking Strategy | Recall@10 | Recall@20 | Precision@10 | Precision@20 | MRR |",
+            "| --- | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for strategy, metrics in sorted(aggregate.get("by_ranking_strategy", {}).items()):
+        lines.append(
+            f"| {strategy} | "
+            f"{metrics.get('recall_at_10', '') if metrics.get('recall_at_10') is not None else ''} | "
+            f"{metrics.get('recall_at_20', '') if metrics.get('recall_at_20') is not None else ''} | "
+            f"{metrics.get('precision_at_10', '') if metrics.get('precision_at_10') is not None else ''} | "
+            f"{metrics.get('precision_at_20', '') if metrics.get('precision_at_20') is not None else ''} | "
+            f"{metrics.get('mrr', '') if metrics.get('mrr') is not None else ''} |"
+        )
+
+    lines.extend(["", "## File Aggregation Strategy Comparison", ""])
+    lines.extend(
+        [
+            "| File Aggregation Strategy | Recall@10 | Recall@20 | Precision@10 | Precision@20 | MRR |",
+            "| --- | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for strategy, metrics in sorted(aggregate.get("by_file_aggregation_strategy", {}).items()):
+        lines.append(
+            f"| {strategy} | "
+            f"{metrics.get('recall_at_10', '') if metrics.get('recall_at_10') is not None else ''} | "
+            f"{metrics.get('recall_at_20', '') if metrics.get('recall_at_20') is not None else ''} | "
+            f"{metrics.get('precision_at_10', '') if metrics.get('precision_at_10') is not None else ''} | "
+            f"{metrics.get('precision_at_20', '') if metrics.get('precision_at_20') is not None else ''} | "
+            f"{metrics.get('mrr', '') if metrics.get('mrr') is not None else ''} |"
+        )
+
+    lines.extend(["", "## Per-Case Key Metrics", ""])
+    lines.extend(
+        [
+            "| Case ID | Ranking Strategy | File Aggregation | Recall@10 | Recall@20 | MRR | Matched GT Files | Missed GT Files |",
+            "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for result in results:
+        metrics = result.get("retrieval_metrics", {}) if isinstance(result.get("retrieval_metrics"), dict) else {}
+        gt = result.get("gt_comparison", {}) if isinstance(result.get("gt_comparison"), dict) else {}
+        lines.append(
+            f"| {result.get('case_id', '')} | {result.get('ranking_strategy', '')} | {result.get('file_aggregation_strategy', '')} | "
+            f"{metrics.get('recall_at_10', '') if metrics.get('recall_at_10') is not None else ''} | "
+            f"{metrics.get('recall_at_20', '') if metrics.get('recall_at_20') is not None else ''} | "
+            f"{metrics.get('mrr', '') if metrics.get('mrr') is not None else ''} | "
+            f"{len(gt.get('matched_gt_paths', [])) if isinstance(gt.get('matched_gt_paths'), list) else 0} | "
+            f"{len(gt.get('missed_gt_paths', [])) if isinstance(gt.get('missed_gt_paths'), list) else 0} |"
+        )
+
+    lines.extend(["", "## Most Frequently Retrieved Files by Epic", ""])
+    top_files_by_case = aggregate.get("top_retrieved_files_by_case", {})
+    if isinstance(top_files_by_case, dict):
+        lines.extend(
+            [
+                "| Case ID | Top 10 Retrieved Files |",
+                "| --- | --- |",
+            ]
+        )
+        for case_id, payload in sorted(top_files_by_case.items()):
+            top_files = payload.get("top_retrieved_files", [])
+            rendered = ", ".join(
+                f"{item.get('path', '')} ({item.get('count', 0)})"
+                for item in top_files[:10]
+            ) if top_files else "None"
+            lines.append(f"| {case_id} | {rendered} |")
+
+    return "\n".join(lines)
+
+
 def _write_outputs(results: list[dict[str, Any]]) -> None:
     aggregate = _aggregate_results(results)
     write_json(OUTPUT_DIR / "retrieval_results.json", results)
     write_json(OUTPUT_DIR / "retrieval_aggregate.json", aggregate)
     write_markdown(OUTPUT_DIR / "retrieval_summary.md", _render_markdown_summary(results, aggregate))
+    write_markdown(
+        OUTPUT_DIR / "retrieval_compact_summary.md",
+        _render_compact_markdown_summary(results, aggregate),
+    )
 
 
 def _build_base_case_result(

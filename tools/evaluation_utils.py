@@ -231,6 +231,46 @@ def build_eval_path_match_map(
     return matches
 
 
+def build_retrieval_path_breakdown(
+    *,
+    historical_paths: list[str],
+    retrieved_paths: list[str],
+) -> dict[str, list[str]]:
+    gt_paths_original = [str(path).strip() for path in historical_paths if str(path).strip()]
+    gt_by_normalized = {
+        normalize_path_for_eval(path): path
+        for path in gt_paths_original
+        if normalize_path_for_eval(path)
+    }
+
+    retrieved_paths_original = [str(path).strip() for path in retrieved_paths if str(path).strip()]
+    match_map = build_eval_path_match_map(gt_paths_original, retrieved_paths_original)
+    matched_normalized = list(match_map.keys())
+    missed_normalized = [
+        normalized
+        for normalized in gt_by_normalized
+        if normalized not in match_map
+    ]
+
+    return {
+        "gt_paths": gt_paths_original,
+        "retrieved_paths": retrieved_paths_original,
+        "matched_gt_paths": [gt_by_normalized[item] for item in matched_normalized],
+        "matched_retrieved_paths": [
+            next(
+                (
+                    retrieved_path
+                    for retrieved_path in retrieved_paths_original
+                    if paths_match_for_eval(gt_by_normalized[item], retrieved_path)
+                ),
+                match_map[item],
+            )
+            for item in matched_normalized
+        ],
+        "missed_gt_paths": [gt_by_normalized[item] for item in missed_normalized],
+    }
+
+
 def render_software_requirements_text(software_requirements: dict[str, Any]) -> str:
     reqs = software_requirements.get("requirements") or software_requirements.get("software_requirements") or []
     trace = software_requirements.get("traceability_summary") or []
@@ -641,8 +681,15 @@ def evaluate_retrieval_case(
             "matched_paths": [],
         }
 
-    match_map = build_eval_path_match_map(historical_paths_original, retrieved_paths_original)
-    matched_paths = sorted(match_map.keys())
+    path_breakdown = build_retrieval_path_breakdown(
+        historical_paths=historical_paths_original,
+        retrieved_paths=retrieved_paths_original,
+    )
+    matched_paths = sorted(
+        normalize_path_for_eval(path)
+        for path in path_breakdown["matched_gt_paths"]
+        if normalize_path_for_eval(path)
+    )
     first_match_rank = None
     for idx, path in enumerate(retrieved_paths_original, start=1):
         if any(paths_match_for_eval(gt_path, path) for gt_path in historical_paths_original):
@@ -1094,6 +1141,103 @@ def render_markdown_summary(case_results: list[dict[str, Any]], aggregate: dict[
         )
         lines.append(
             f"| {case.get('case_id', '')} | {description_preview} | {case.get('ranking_strategy', '')} | {case.get('file_aggregation_strategy', '')} | {case.get('retrieval_strategy', '')} | {case.get('task_type', '')} | {case.get('difficulty', '')} | {retrieval_recall_at_10} | {retrieval_recall_at_20} | {iis_score} | {historical_iis_score} | {iis_delta} | {sq_score} | {historical_sq_score} | {sq_delta} |"
+        )
+
+    return "\n".join(lines) + "\n"
+
+
+def render_compact_markdown_summary(case_results: list[dict[str, Any]], aggregate: dict[str, Any]) -> str:
+    lines = ["# Evaluation Compact Summary", ""]
+
+    lines.extend(
+        [
+            "## Strategy Comparison",
+            "",
+            "| Strategy | Recall@10 | Recall@20 | MRR | Generated IIS Overall | Historical IIS Overall | IIS Delta | Generated SQ Overall | Historical SQ Overall | SQ Delta |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for strategy, sections in sorted(aggregate.get("by_strategy", {}).items()):
+        retrieval = sections.get("retrieval_metrics", {})
+        generated_iis = sections.get("iis_evaluation", {}).get("overall")
+        historical_iis = sections.get("historical_iis_baseline_evaluation", {}).get("overall")
+        generated_sq = sections.get("software_requirements_evaluation", {}).get("overall")
+        historical_sq = sections.get("historical_software_requirements_baseline_evaluation", {}).get("overall")
+        iis_delta = (
+            round(float(generated_iis) - float(historical_iis), 3)
+            if isinstance(generated_iis, (int, float)) and isinstance(historical_iis, (int, float))
+            else ""
+        )
+        sq_delta = (
+            round(float(generated_sq) - float(historical_sq), 3)
+            if isinstance(generated_sq, (int, float)) and isinstance(historical_sq, (int, float))
+            else ""
+        )
+        lines.append(
+            f"| {strategy} | {retrieval.get('recall_at_10', '') if retrieval.get('recall_at_10') is not None else ''} | "
+            f"{retrieval.get('recall_at_20', '') if retrieval.get('recall_at_20') is not None else ''} | "
+            f"{retrieval.get('mrr', '') if retrieval.get('mrr') is not None else ''} | "
+            f"{generated_iis if generated_iis is not None else ''} | "
+            f"{historical_iis if historical_iis is not None else ''} | "
+            f"{iis_delta if iis_delta != '' else ''} | "
+            f"{generated_sq if generated_sq is not None else ''} | "
+            f"{historical_sq if historical_sq is not None else ''} | "
+            f"{sq_delta if sq_delta != '' else ''} |"
+        )
+
+    lines.extend(["", "## Ranking Strategy Comparison", ""])
+    lines.extend(
+        [
+            "| Ranking Strategy | Recall@10 | Recall@20 | MRR | IIS Overall | SQ Overall |",
+            "| --- | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for strategy, sections in sorted(aggregate.get("by_ranking_strategy", {}).items()):
+        retrieval = sections.get("retrieval_metrics", {})
+        iis_overall = sections.get("iis_evaluation", {}).get("overall")
+        sq_overall = sections.get("software_requirements_evaluation", {}).get("overall")
+        lines.append(
+            f"| {strategy} | {retrieval.get('recall_at_10', '') if retrieval.get('recall_at_10') is not None else ''} | "
+            f"{retrieval.get('recall_at_20', '') if retrieval.get('recall_at_20') is not None else ''} | "
+            f"{retrieval.get('mrr', '') if retrieval.get('mrr') is not None else ''} | "
+            f"{iis_overall if iis_overall is not None else ''} | {sq_overall if sq_overall is not None else ''} |"
+        )
+
+    lines.extend(["", "## File Aggregation Strategy Comparison", ""])
+    lines.extend(
+        [
+            "| File Aggregation Strategy | Recall@10 | Recall@20 | MRR | IIS Overall | SQ Overall |",
+            "| --- | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for strategy, sections in sorted(aggregate.get("by_file_aggregation_strategy", {}).items()):
+        retrieval = sections.get("retrieval_metrics", {})
+        iis_overall = sections.get("iis_evaluation", {}).get("overall")
+        sq_overall = sections.get("software_requirements_evaluation", {}).get("overall")
+        lines.append(
+            f"| {strategy} | {retrieval.get('recall_at_10', '') if retrieval.get('recall_at_10') is not None else ''} | "
+            f"{retrieval.get('recall_at_20', '') if retrieval.get('recall_at_20') is not None else ''} | "
+            f"{retrieval.get('mrr', '') if retrieval.get('mrr') is not None else ''} | "
+            f"{iis_overall if iis_overall is not None else ''} | {sq_overall if sq_overall is not None else ''} |"
+        )
+
+    lines.extend(["", "## Per-Case Key Scores", ""])
+    lines.extend(
+        [
+            "| Case ID | Ranking Strategy | File Aggregation | Recall@10 | Recall@20 | IIS Overall | Historical IIS Overall | SQ Overall | Historical SQ Overall |",
+            "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for case in case_results:
+        iis_score = case.get("iis_evaluation", {}).get("scores", {}).get("overall", "")
+        historical_iis_score = case.get("historical_iis_baseline_evaluation", {}).get("scores", {}).get("overall", "")
+        sq_score = case.get("software_requirements_evaluation", {}).get("scores", {}).get("overall", "")
+        historical_sq_score = case.get("historical_software_requirements_baseline_evaluation", {}).get("scores", {}).get("overall", "")
+        retrieval_recall_at_10 = case.get("retrieval_metrics", {}).get("recall_at_10", "")
+        retrieval_recall_at_20 = case.get("retrieval_metrics", {}).get("recall_at_20", "")
+        lines.append(
+            f"| {case.get('case_id', '')} | {case.get('ranking_strategy', '')} | {case.get('file_aggregation_strategy', '')} | "
+            f"{retrieval_recall_at_10} | {retrieval_recall_at_20} | {iis_score} | {historical_iis_score} | {sq_score} | {historical_sq_score} |"
         )
 
     return "\n".join(lines) + "\n"

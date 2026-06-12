@@ -24,6 +24,7 @@ from evaluation_utils import (
     PROJECT_ROOT,
     apply_retrieval_strategy_override,
     aggregate_scores,
+    build_retrieval_path_breakdown,
     evaluate_iis_case,
     evaluate_retrieval_case,
     evaluate_software_requirements_case,
@@ -40,6 +41,7 @@ from evaluation_utils import (
     render_historical_software_requirements_text,
     load_eval_config,
     load_json,
+    render_compact_markdown_summary,
     render_markdown_summary,
     retrieve_evidence_payload,
     write_json,
@@ -264,6 +266,10 @@ def _write_run_outputs(results: list[dict[str, object]]) -> None:
     write_json(OUTPUT_DIR / "evaluation_results.json", results)
     write_json(OUTPUT_DIR / "evaluation_aggregate.json", aggregate)
     write_markdown(OUTPUT_DIR / "evaluation_summary.md", render_markdown_summary(results, aggregate))
+    write_markdown(
+        OUTPUT_DIR / "evaluation_compact_summary.md",
+        render_compact_markdown_summary(results, aggregate),
+    )
 
 
 def _looks_like_code_path(value: str) -> bool:
@@ -578,6 +584,14 @@ def main() -> None:
                     case_result["retrieval_metrics"] = evaluate_retrieval_case(
                         case=case,
                         generation=generation,
+                    )
+                    case_result["retrieval_path_breakdown"] = build_retrieval_path_breakdown(
+                        historical_paths=get_case_historical_changed_files(case),
+                        retrieved_paths=[
+                            str(item.get("path", "")).strip()
+                            for item in (generation.get("evidence") or [])
+                            if str(item.get("path", "")).strip()
+                        ],
                     )
                     _mark_stage(checkpoint, stage_name="retrieval_metrics", status="completed")
                     _save_checkpoint(checkpoint_path, checkpoint)
