@@ -32,6 +32,7 @@ from evaluation_utils import (
     get_case_task_type,
     load_eval_config,
     load_json,
+    normalize_path_for_eval,
     retrieve_evidence_payload,
     write_json,
     write_markdown,
@@ -199,6 +200,24 @@ def _mark_stage(checkpoint: dict[str, object], *, stage_name: str, status: str) 
         "status": status,
         "updated_at": _utc_now_iso(),
     }
+
+
+def _classify_failure_status(checkpoint: dict[str, object]) -> str:
+    last_step = str(checkpoint.get("last_step", "")).strip()
+    stages = checkpoint.get("stages", {})
+    retrieval_metrics_completed = (
+        isinstance(stages, dict)
+        and isinstance(stages.get("retrieval_metrics"), dict)
+        and str(stages["retrieval_metrics"].get("status", "")).strip() == "completed"
+    )
+
+    if last_step in {"retrieval_intent", "evidence"}:
+        return "generation_failed"
+    if last_step == "retrieval_metrics":
+        return "metrics_failed"
+    if retrieval_metrics_completed or last_step in {"write_outputs", "completed"}:
+        return "summary_failed"
+    return "failed"
 
 
 def _compute_gt_path_breakdown(case: dict[str, object], evidence: list[dict[str, Any]]) -> dict[str, Any]:
@@ -795,11 +814,13 @@ def main() -> None:
                 _mark_stage(checkpoint, stage_name="retrieval_metrics", status="completed")
                 checkpoint["status"] = "completed"
                 checkpoint["completed_at"] = _utc_now_iso()
-                checkpoint["last_step"] = "completed"
+                checkpoint["last_step"] = "write_outputs"
                 _save_checkpoint(checkpoint_path, checkpoint)
 
                 results.append(case_result)
                 _write_outputs(results)
+                checkpoint["last_step"] = "completed"
+                _save_checkpoint(checkpoint_path, checkpoint)
 
                 elapsed_seconds = time.perf_counter() - case_started_at
                 _log_progress(
@@ -812,7 +833,7 @@ def main() -> None:
                     total_strategies=total_strategies,
                 )
             except Exception as exc:
-                checkpoint["status"] = "failed"
+                checkpoint["status"] = _classify_failure_status(checkpoint)
                 checkpoint["error"] = {
                     "type": type(exc).__name__,
                     "message": str(exc),
