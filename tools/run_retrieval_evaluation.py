@@ -841,6 +841,7 @@ def main() -> None:
                     "failed_at": _utc_now_iso(),
                 }
                 _save_checkpoint(checkpoint_path, checkpoint)
+                _write_outputs(results)
                 _log_progress(
                     step_label=f"failed at {checkpoint.get('last_step', 'unknown_step')}: {type(exc).__name__}: {exc}",
                     strategy_name=strategy_name,

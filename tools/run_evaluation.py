@@ -261,6 +261,35 @@ def _mark_stage(
     }
 
 
+def _classify_failure_status(checkpoint: dict[str, object]) -> str:
+    last_step = str(checkpoint.get("last_step", "")).strip()
+    stages = checkpoint.get("stages", {})
+
+    if last_step in {
+        "retrieval_intent",
+        "evidence",
+        "iis",
+        "software_requirements",
+        "load_pregenerated",
+    }:
+        return "generation_failed"
+    if last_step in {
+        "retrieval_metrics",
+        "generated_iis_evaluation",
+        "historical_iis_baseline_evaluation",
+        "generated_software_requirements_evaluation",
+        "historical_software_requirements_baseline_evaluation",
+    }:
+        return "judge_failed"
+    if (
+        isinstance(stages, dict)
+        and isinstance(stages.get("retrieval_metrics"), dict)
+        and str(stages["retrieval_metrics"].get("status", "")).strip() == "completed"
+    ) or last_step in {"write_outputs", "completed"}:
+        return "summary_failed"
+    return "failed"
+
+
 def _write_run_outputs(results: list[dict[str, object]]) -> None:
     aggregate = aggregate_scores(results)
     write_json(OUTPUT_DIR / "evaluation_results.json", results)
@@ -711,11 +740,13 @@ def main() -> None:
 
                 checkpoint["status"] = "completed"
                 checkpoint["completed_at"] = _utc_now_iso()
-                checkpoint["last_step"] = "completed"
+                checkpoint["last_step"] = "write_outputs"
                 _save_checkpoint(checkpoint_path, checkpoint)
 
                 results.append(case_result)
                 _write_run_outputs(results)
+                checkpoint["last_step"] = "completed"
+                _save_checkpoint(checkpoint_path, checkpoint)
 
                 elapsed_seconds = time.perf_counter() - case_started_at
                 _log_eval_progress(
@@ -728,7 +759,7 @@ def main() -> None:
                     total_strategies=total_strategies,
                 )
             except Exception as exc:
-                checkpoint["status"] = "failed"
+                checkpoint["status"] = _classify_failure_status(checkpoint)
                 checkpoint["error"] = {
                     "type": type(exc).__name__,
                     "message": str(exc),
@@ -736,6 +767,7 @@ def main() -> None:
                     "failed_at": _utc_now_iso(),
                 }
                 _save_checkpoint(checkpoint_path, checkpoint)
+                _write_run_outputs(results)
                 _log_eval_progress(
                     step_label=f"failed at {checkpoint.get('last_step', 'unknown_step')}: {type(exc).__name__}: {exc}",
                     strategy_name=strategy_name,
