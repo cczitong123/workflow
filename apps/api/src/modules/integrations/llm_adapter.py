@@ -70,6 +70,25 @@ def _retry_delay_seconds(config: LlmApiConfig, attempt: int) -> float:
     return base * (2 ** max(attempt - 1, 0))
 
 
+def _extract_unsupported_parameters(error_body: dict | None) -> list[str]:
+    if not isinstance(error_body, dict):
+        return []
+    message = str(error_body.get("message", "")).strip()
+    if not message:
+        return []
+    match = re.search(r"does not support parameters:\s*(.+)$", message, re.IGNORECASE)
+    if not match:
+        return []
+    raw = match.group(1)
+    candidates = [item.strip() for item in raw.split(",")]
+    normalized: list[str] = []
+    for item in candidates:
+        token = re.sub(r"[^A-Za-z0-9_]+", "", item)
+        if token:
+            normalized.append(token)
+    return normalized
+
+
 def _run_with_retries(
     *,
     operation_name: str,
@@ -630,17 +649,42 @@ def _call_remote_chat(prompt: str, config: LlmApiConfig) -> str:
         _log(f"Payload keys={list(payload.keys())}")
 
         with httpx.Client(**client_kwargs) as client:
-            _log("Sending remote chat request")
-            response = client.post(url, headers=headers, json=payload)
-            _log(f"Remote chat response status={response.status_code}")
-            _log(f"Remote chat response headers={dict(response.headers)}")
-            try:
-                body = response.json()
-                _log(f"Remote chat response body(JSON)={json.dumps(body, ensure_ascii=False)[:4000]}")
-            except Exception:
-                body = None
-                _log(f"Remote chat response body(raw)={response.text[:4000]}")
-            response.raise_for_status()
+            current_payload = dict(payload)
+            already_trimmed_unsupported = False
+            while True:
+                _log("Sending remote chat request")
+                response = client.post(url, headers=headers, json=current_payload)
+                _log(f"Remote chat response status={response.status_code}")
+                _log(f"Remote chat response headers={dict(response.headers)}")
+                try:
+                    body = response.json()
+                    _log(f"Remote chat response body(JSON)={json.dumps(body, ensure_ascii=False)[:4000]}")
+                except Exception:
+                    body = None
+                    _log(f"Remote chat response body(raw)={response.text[:4000]}")
+
+                unsupported = _extract_unsupported_parameters(body)
+                if (
+                    response.status_code == 400
+                    and unsupported
+                    and not already_trimmed_unsupported
+                ):
+                    removed = []
+                    for key in unsupported:
+                        if key in current_payload:
+                            current_payload.pop(key, None)
+                            removed.append(key)
+                    if removed:
+                        already_trimmed_unsupported = True
+                        _log(
+                            "Remote model rejected unsupported parameters; retrying once without "
+                            + ", ".join(removed)
+                        )
+                        _log(f"Payload keys after trim={list(current_payload.keys())}")
+                        continue
+
+                response.raise_for_status()
+                break
         if body is None:
             raise RuntimeError("Remote LLM response body is not valid JSON.")
         try:
