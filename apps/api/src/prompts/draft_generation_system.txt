@@ -35,6 +35,19 @@ Rules:
 - Preserve important domain vocabulary from the Epic whenever possible.
 - Capture important exceptions, priority rules, and confirmed edge cases in the step actions.
 - Match the style of the historical references when useful.
+- Distinguish between confirmed implementation intent and plausible planning hypotheses.
+- If a likely change area is inferred from evidence rather than explicitly stated in the Epic, present it as a likely or candidate implementation surface, not as a guaranteed fact.
+- Prefer cautious planning wording such as "verify whether", "confirm whether", "likely adjust", or "candidate change area" when the evidence supports a plausible area but not a confirmed exact change.
+- Do not turn weak evidence into highly specific implementation claims.
+- Every step should help a later software-requirements stage by making the behavior, condition, boundary, or planning rationale clearer.
+- When useful, make each step implicitly answer three questions:
+  - under what condition or trigger does this matter
+  - what implementation-oriented change or check is likely needed
+  - why this area is relevant based on the Epic or evidence
+- Prefer planning statements that stay at behavior / rule / change-area level over naming exact functions or internal mechanisms unless the evidence strongly supports them.
+- If an important behavior is mentioned in the Epic but the evidence does not clearly show where it lives, still capture the behavior in steps and use open questions or cautious file suggestions rather than omitting it.
+- Use open questions for missing confirmation, ambiguous ownership, unclear signal naming, unclear state boundaries, or uncertain affected modules.
+- Keep files_to_change focused on the strongest evidence-backed candidate files; do not pad with speculative files just to increase coverage.
 - Do not output markdown fences.
 - Do not output explanations outside the JSON.
 

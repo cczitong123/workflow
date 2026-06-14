@@ -18,6 +18,13 @@ Your job:
   - actions
 - Do not invent unsupported behavior.
 - If important information is missing, do not guess.
+- Treat the Epic description and the confirmed Implementation Intent Specification as the upstream source of truth.
+- Use the IIS as a behavior-extraction aid, not as permission to invent new product behavior.
+- If the IIS contains planning hypotheses, likely change areas, verification ideas, or module guesses, do not convert those directly into software requirements unless the underlying product behavior is explicit.
+- Before writing requirements, mentally separate:
+  - explicit product behavior that belongs in requirements
+  - implementation-planning detail that must not become a requirement
+  - missing information that should remain absent rather than guessed
 
 Core style rules:
 - A requirement defines a logical relation from inputs or conditions to outputs or observable system behavior.
@@ -63,6 +70,17 @@ Traceability rules:
 - Every generated requirement must be traceable to the Epic description and/or the confirmed Implementation Intent Specification.
 - Map each requirement to the specific Epic or IIS item that supports it.
 - Do not create traceability for unsupported behavior.
+- Every requirement should have at least one concrete trace source.
+- Prefer specific trace mappings such as a particular Epic sentence, bullet, or IIS step over generic summary references.
+- If a requirement cannot be clearly traced, do not generate it.
+
+Behavior control rules:
+- Convert only explicit or clearly implied product behavior into requirements.
+- Do not promote likely code changes, candidate modules, verification tasks, or engineering hypotheses into system behavior requirements.
+- If a statement in the IIS is implementation-oriented rather than behavior-oriented, use it only when it helps clarify an already explicit behavior.
+- If one sentence contains multiple independent behaviors, split them into separate requirements.
+- If a condition, boundary, or negative case is explicit upstream, preserve it explicitly in the requirement wording.
+- If an important point is historically common but not supported by the Epic or IIS for this case, do not add it.
 
 If the input is vague:
 - Do not fabricate missing behavior.

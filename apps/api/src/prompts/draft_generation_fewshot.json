@@ -1,1 +1,158 @@
-[]
+[
+  {
+    "description": "Bug CR for PVis availability logic.\n\nSystem behaviour:\nNot all PVis degradation and not-available conditions are currently restricted to the correct PWF scope. The valid scope must include Wohnen, FahrbereitschaftHerstellen, Fahren, and FahrbereitschaftBeenden where required.\n\nTechnical details:\nVideo Watch Dog related conditions, PVis availability degradation, and parkmenu display-alive related signalling must be checked against the corrected scope and the existing velocity / startup-time guards.",
+    "evidence": [
+      {
+        "path": "infrastructure/statistic/src/persistency/persistency_pvis.cpp",
+        "symbol": "PersistencyPVis",
+        "why_relevant": "Contains PVis-related status and error persistence handling.",
+        "suggested_change": "Verify whether scope-dependent PVis error triggering is derived or persisted here."
+      },
+      {
+        "path": "shared/parking_data_service_types.h",
+        "symbol": "pwfState",
+        "why_relevant": "Likely contains state and signal types referenced by the scope logic.",
+        "suggested_change": "Confirm the exact PWF state names and whether the corrected scope is already represented centrally."
+      },
+      {
+        "path": "components/user_interaction/src/modules/parkmenu/camera_stream/helpers/update_reasons.cpp",
+        "symbol": "update_reasons",
+        "why_relevant": "Likely participates in user-facing PVis update or degradation reasons.",
+        "suggested_change": "Check whether the corrected scope must also affect user-facing status propagation."
+      }
+    ],
+    "references": [],
+    "output": {
+      "steps": [
+        {
+          "condition": "If a PVis degradation or not-available condition is evaluated for the affected Video Watch Dog, availability, or parkmenu-display-alive logic",
+          "actions": [
+            "Verify whether the current trigger logic still assumes an incomplete PWF scope and extend the planning baseline to include Wohnen, FahrbereitschaftHerstellen, Fahren, and FahrbereitschaftBeenden where the Epic explicitly requires that scope.",
+            "Keep the existing velocity and startup-time guards as part of the planning baseline unless the evidence shows that those guards themselves are inconsistent."
+          ]
+        },
+        {
+          "condition": "If the corrected scope is represented differently across the affected areas",
+          "actions": [
+            "Plan to align the scope interpretation across the affected PVis condition chains so the same state boundary is used consistently for degradation and availability decisions.",
+            "Treat central type or state-definition locations as candidate confirmation points before introducing any more specific module-level change assumption."
+          ]
+        },
+        {
+          "condition": "If user-facing PVis status or update reasons are derived from the same condition chain",
+          "actions": [
+            "Verify whether downstream propagation of the corrected scope is also needed so the displayed availability or degradation result stays consistent with the corrected trigger logic.",
+            "Keep this as a likely adjacent planning area rather than a confirmed mandatory change unless the retrieved evidence clearly shows direct coupling."
+          ]
+        }
+      ],
+      "files_to_change": [
+        {
+          "path": "shared/parking_data_service_types.h",
+          "reason": "Candidate source for confirming the exact PWF scope and state naming used by the affected logic."
+        },
+        {
+          "path": "infrastructure/statistic/src/persistency/persistency_pvis.cpp",
+          "reason": "Likely implementation surface for persisted or derived PVis error-state handling that may depend on the corrected scope."
+        },
+        {
+          "path": "components/user_interaction/src/modules/parkmenu/camera_stream/helpers/update_reasons.cpp",
+          "reason": "Plausible adjacent area if corrected availability logic must also remain consistent in user-facing update reasons."
+        }
+      ],
+      "open_questions": [
+        {
+          "id": "oq-1",
+          "question": "Which exact PVis condition chains are confirmed to consume the corrected PWF scope directly, and which only receive downstream status propagation?",
+          "reason": "This determines whether the change stays local to the trigger logic or must also cover adjacent propagation paths.",
+          "status": "open"
+        },
+        {
+          "id": "oq-2",
+          "question": "Are the relevant PWF state names already normalized in a shared type or helper location, or are they interpreted separately in multiple affected modules?",
+          "reason": "This affects whether the planning scope should center on one shared definition or on several parallel condition implementations.",
+          "status": "open"
+        }
+      ],
+      "summary": "Correct the planning scope for the affected PVis condition chains so the required PWF states are handled consistently, while keeping file-level changes cautious unless direct evidence confirms the exact ownership."
+    }
+  },
+  {
+    "description": "System behaviour:\nThe function status should keep display active as long as the function is active.\n\nTechnical details:\nThe parking manoeuvre active indicator must remain active while the function stays active, and the existing logic may need to consider both parking and cruising situations with active control. Related checks may involve the current target mode, AVP status, and whether lateral guidance is currently requested.",
+    "evidence": [
+      {
+        "path": "components/maneuver_controller/src/modules/maneuvering_functions_control/common/parking_functions_controller/parking_functions_controller.cpp",
+        "symbol": "parking_functions_controller",
+        "why_relevant": "Likely contains shared activation logic for parking-function state handling.",
+        "suggested_change": "Verify whether function-active status and maneuver-active signalling are guarded here."
+      },
+      {
+        "path": "components/maneuver_controller/src/modules/maneuvering_functions_control/common/conditions/common_longitudinal_lateral_conditions.cpp",
+        "symbol": "common_longitudinal_lateral_conditions",
+        "why_relevant": "Likely contains reusable state and control-active conditions.",
+        "suggested_change": "Check whether parking vs cruising control-active conditions are centralized here."
+      },
+      {
+        "path": "components/user_interaction/src/modules/function_status/function_status.cpp",
+        "symbol": "function_status",
+        "why_relevant": "Plausible UI-side consumer of the function-active signal.",
+        "suggested_change": "Confirm whether display persistence is directly controlled here or only receives a status from maneuver_controller."
+      }
+    ],
+    "references": [],
+    "output": {
+      "steps": [
+        {
+          "condition": "If the function status display is expected to remain active while the underlying function remains active",
+          "actions": [
+            "Plan to verify the current active-state condition chain and ensure the display-driving logic continues to treat sustained function activity as the primary persistence condition.",
+            "Do not assume the exact implementation owner yet; keep the maneuver-controller side and the UI-consumer side both in scope until evidence confirms where the persistence decision is made."
+          ]
+        },
+        {
+          "condition": "If the current logic distinguishes only parking-mode activity and ignores cruising cases with active control",
+          "actions": [
+            "Treat the parking-versus-cruising boundary as a likely planning focus and verify whether the active-state condition should be widened to cover cruising with active control when the Epic requires the function to remain shown as active.",
+            "Keep the relationship between target mode, AVP status, and lateral-guidance request explicit in the planning draft so later software requirements can reuse those conditions without introducing new behavior."
+          ]
+        },
+        {
+          "condition": "If multiple modules reuse the same active-condition interpretation",
+          "actions": [
+            "Prefer confirming a reusable common condition before planning several disconnected local fixes.",
+            "Only name a more specific module-level update when the evidence clearly indicates that the condition is locally duplicated rather than centrally derived."
+          ]
+        }
+      ],
+      "files_to_change": [
+        {
+          "path": "components/maneuver_controller/src/modules/maneuvering_functions_control/common/parking_functions_controller/parking_functions_controller.cpp",
+          "reason": "Likely shared location for function-active or maneuver-active state handling."
+        },
+        {
+          "path": "components/maneuver_controller/src/modules/maneuvering_functions_control/common/conditions/common_longitudinal_lateral_conditions.cpp",
+          "reason": "Candidate reusable condition area for parking-versus-cruising and control-active logic."
+        },
+        {
+          "path": "components/user_interaction/src/modules/function_status/function_status.cpp",
+          "reason": "Plausible downstream consumer if display persistence is decided on the UI side."
+        }
+      ],
+      "open_questions": [
+        {
+          "id": "oq-1",
+          "question": "Is display persistence decided centrally in maneuver_controller or only consumed by user_interaction after an upstream active-state decision?",
+          "reason": "This determines whether the planning focus should remain on condition generation or also include UI-side persistence handling.",
+          "status": "open"
+        },
+        {
+          "id": "oq-2",
+          "question": "Which exact combination of target mode, AVP status, and control-active state is intended to count as function-active for the cruising case?",
+          "reason": "The planning draft should not hard-code the widened condition without confirming the intended boundary.",
+          "status": "open"
+        }
+      ],
+      "summary": "Preserve function-status display persistence while the function remains active, and treat the parking-versus-cruising active-condition boundary as the main planning focus until the exact ownership and condition definition are confirmed."
+    }
+  }
+]
