@@ -22,6 +22,9 @@ Important task framing:
 - Do not treat every inference beyond the historical wording as a hallucination.
 - Penalize only when the candidate introduces implausible, misleading, or clearly unsupported implementation claims.
 - If the historical reference is short, vague, or under-structured, do not reward it merely for being conservative.
+- A strong IIS draft is allowed to make the work more explicit, more structured, and more implementation-oriented than the historical reference.
+- For this task, a well-structured and plausible planning draft should usually score in the 3-4 range even when it is not perfect.
+- Reserve score 1 for truly poor artifacts, not merely for drafts that are more detailed than the historical reference.
 
 Evaluation dimensions:
 - reference_alignment: How well the candidate captures the historically visible implementation intent points, conditions, and planning concerns from the reference artifact.
@@ -39,28 +42,28 @@ Rubric anchors for each dimension:
 
 Dimension-specific scoring guidance:
 - reference_alignment:
-  - 5: Captures nearly all historically visible behaviors, conditions, constraints, and planning points from the reference without major omission.
-  - 3: Captures the main historical points, but misses some secondary conditions, exceptions, or scope details.
+  - 5: Captures nearly all historically visible behaviors, conditions, constraints, and planning points from the reference without major omission, while possibly improving structure and planning clarity.
+  - 3: Captures the main historical points and intended scope, even if some secondary conditions, exceptions, or finer scope details are missing.
   - 1: Misses major historical intent or materially misrepresents the planning scope.
 - actionability:
   - 5: Breaks the task into concrete, engineer-usable implementation rules, checks, or change areas that support real planning.
-  - 3: Partly actionable, but still somewhat abstract, vague, or uneven in decomposition.
+  - 3: Clearly usable as a planning draft, but still somewhat abstract, vague, or uneven in decomposition.
   - 1: Too abstract or generic to guide implementation planning.
 - change_scope_alignment:
   - 5: Suggested change areas strongly match the likely implementation scope implied by the historical reference, including clearly adjacent modules or equivalent decomposition.
-  - 3: Alignment is partially plausible, but some change areas are broad, generic, or only loosely supported.
+  - 3: Alignment is generally plausible at module, subsystem, or functional-chain level, even if some file-level choices are broad or only loosely supported.
   - 1: Suggested change areas are implausible or disconnected from the likely implementation scope.
 - grounded_plausibility:
   - 5: Stays well grounded in the historical intent while making only reasonable planning inferences; no major unsupported implementation claims.
-  - 3: Mostly plausible and grounded, but includes some overconfident or weakly supported planning detail.
+  - 3: Mostly plausible and grounded, with some planning detail that is inferred rather than directly stated, but still reasonable for an implementation-planning draft.
   - 1: Frequently introduces implausible, misleading, or clearly unsupported implementation claims.
 - added_value_analysis:
   - 5: Adds meaningful structure, decomposition, and engineering planning value beyond paraphrasing the reference.
-  - 3: Adds some useful structure, but still reads partly like a reorganized restatement.
+  - 3: Adds useful structure and planning value beyond the reference, even if some sections still read like a reorganized restatement.
   - 1: Mostly paraphrases the reference with little additional planning value.
 - overall:
   - 5: Strong downstream artifact that an engineer could confidently use as a planning draft.
-  - 3: Usable planning draft, but still needs reviewer refinement or cleanup before strong engineering use.
+  - 3: Solid and usable planning draft that still needs reviewer refinement or cleanup before strong engineering use.
   - 1: Weak artifact that would likely mislead or stall downstream work.
 
 Important evaluation rules:
@@ -69,6 +72,8 @@ Important evaluation rules:
 - Reward clear decomposition into implementation checks, rules, conditions, or likely change areas.
 - Reward structured planning drafts that make the work more understandable, even if they are more explicit than the historical reference.
 - Do not penalize a generated IIS just for being more complete, more structured, or more concrete than the historical reference.
+- If the candidate identifies a plausible implementation surface within the same subsystem or functional chain, score change_scope_alignment positively even when the exact file names differ from the historical reference.
+- If the candidate makes reasonable planning inferences that help an engineer act on the task, score grounded_plausibility and overall in the mid-to-high range unless the claims are clearly implausible.
 - Prefer plausibility and planning usefulness over literal wording match.
 - Do not reward verbosity by itself. More text is only better if it adds grounded planning value.
 - Keep the evaluation grounded in the provided inputs only.
