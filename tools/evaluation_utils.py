@@ -750,12 +750,8 @@ def evaluate_iis_case(
         task_type=get_case_task_type(case),
         difficulty=get_case_difficulty(case),
         candidate_label=candidate_label,
-        description=get_case_description(case),
         candidate_iis=candidate_iis_text,
-        candidate_evidence=format_evidence_block(candidate_evidence),
         historical_what_to_do=get_case_historical_what_to_do(case) or "None provided.",
-        historical_changed_files=format_list_block(get_case_historical_changed_files(case)),
-        notes=str(case.get("notes", "")).strip() or "None provided.",
     )
     print(
         "[EVAL][judge][iis] "
@@ -784,11 +780,8 @@ def evaluate_software_requirements_case(
         task_type=get_case_task_type(case),
         difficulty=get_case_difficulty(case),
         candidate_label=candidate_label,
-        description=get_case_description(case),
-        confirmed_iis=confirmed_iis_text,
         candidate_software_requirements=candidate_software_requirements_text,
         historical_software_requirements=format_list_block(get_case_historical_software_requirements(case)),
-        notes=str(case.get("notes", "")).strip() or "None provided.",
     )
     print(
         "[EVAL][judge][sr] "

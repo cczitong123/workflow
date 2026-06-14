@@ -628,12 +628,12 @@ def _call_remote_chat(prompt: str, config: LlmApiConfig) -> str:
         payload = {
             "model": config.model,
             "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": config.max_tokens,
         }
         if config.include_tuning_params:
             payload.update(
                 {
                     "temperature": config.temperature,
-                    "max_tokens": config.max_tokens,
                     "top_p": config.top_p,
                     "presence_penalty": config.presence_penalty,
                     "frequency_penalty": config.frequency_penalty,
