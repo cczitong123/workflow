@@ -16,74 +16,78 @@ Scoring scale:
 - 4 = strong
 - 5 = excellent
 
+Important task framing:
+- This artifact is a software-requirements draft, not a final reviewed database entry.
+- Clear formalization, explicit condition wording, and decomposition into multiple requirements are positive traits.
+- Do not penalize a candidate simply for being more explicit, more structured, or more review-ready than the historical reference.
+- Penalize only when the candidate introduces clearly unsupported new product behavior or materially distorts the historical intent.
+
 Evaluation dimensions:
-- reference_alignment: How well the candidate requirements cover the historically visible requirement content from the reference artifact.
-- non_hallucination: How well the candidate requirements avoid unsupported or invented behavior relative to the historical reference.
+- reference_alignment: How well the candidate covers the historically visible requirement content, conditions, and intended scope from the reference artifact.
+- upstream_faithfulness: How faithfully the candidate preserves the historical requirement intent while allowing reasonable formalization, clearer wording, and condition splitting.
 - atomicity_and_breakdown: How well the output splits behavior into appropriately granular requirements instead of combining unrelated concerns.
 - testability: How directly the candidate requirements support downstream verification or test derivation.
-- guideline_alignment: How well the candidate requirements follow the Parkmaster/BMW requirements-writing style, including clear requirement/condition/action structure, explicit logic, and stable domain wording.
-- traceability_quality: How well the traceability summary maps each requirement back to meaningful historical reference points.
-- terminology_consistency: How consistently the candidate requirements preserve domain terms and avoid ambiguity.
-- overall: Your holistic assessment of the candidate Software Requirements artifact for downstream requirement engineering use.
+- guideline_alignment: How well the candidate follows the intended Parkmaster/BMW requirements-writing style, including clear condition/action structure, explicit logic, readable sentences, and stable domain wording.
+- traceability_quality: How well the traceability is reviewable and understandable. A clear draft-level mapping to meaningful reference points should score positively even if it is not tool-grade or line-perfect.
+- terminology_consistency: How consistently the candidate preserves domain terms and avoids ambiguity.
+- overall: Your holistic assessment of the candidate Software Requirements artifact for downstream requirement-engineering use.
 
 Rubric anchors for each dimension:
-- Score 5: Excellent. The output is strong and reliable on this dimension, with only minor or no meaningful weaknesses.
-- Score 3: Acceptable. The output is usable on this dimension, but it has visible limitations, omissions, or unevenness.
-- Score 1: Very weak. The output fails on this dimension in a way that would materially reduce downstream requirement usefulness.
-- Use scores 2 and 4 only when the output clearly falls between the anchor descriptions.
+- Score 5: Excellent. Strong and reliable on this dimension, with only minor weaknesses.
+- Score 3: Acceptable. Usable on this dimension, but with visible limitations or unevenness.
+- Score 1: Very weak. Fails on this dimension in a way that materially reduces downstream usefulness.
+- Use scores 2 and 4 only when the output clearly falls between anchor descriptions.
 
 Dimension-specific scoring guidance:
 - reference_alignment:
   - 5: Covers nearly all historically visible requirement points, conditions, and scope boundaries from the reference artifact.
-  - 3: Covers the main historical requirement content, but misses some explicit conditions, edge cases, or secondary behavior.
+  - 3: Covers the main historical requirement content, but misses some secondary conditions, edge cases, or scope details.
   - 1: Misses major historically visible requirement behavior or materially distorts the intended scope.
-- non_hallucination:
-  - 5: Preserves the historical requirement intent with little or no unsupported interpretation.
-  - 3: Mostly grounded, but introduces some questionable inference, emphasis drift, or boundary expansion.
+- upstream_faithfulness:
+  - 5: Preserves the historical requirement intent while improving wording, structure, and condition clarity without introducing unsupported new behavior.
+  - 3: Mostly faithful, but introduces some questionable interpretation, boundary drift, or over-specific detail.
   - 1: Frequently invents, distorts, or overextends behavior beyond what the historical reference supports.
 - atomicity_and_breakdown:
   - 5: Splits behaviors into well-scoped, reusable, atomic requirements with sensible breakdown and no major requirement stuffing.
-  - 3: Breakdown is partly useful, but some requirements still combine multiple independent behaviors or omit reusable scope decomposition.
+  - 3: Breakdown is partly useful, but some requirements still combine multiple independent behaviors or omit useful separation.
   - 1: Requirements are poorly decomposed, overloaded, or not meaningfully separated.
 - testability:
   - 5: Requirements are written so that verification steps or tests can be derived directly and confidently.
   - 3: Requirements are partly testable, but some wording remains vague, underspecified, or hard to verify.
   - 1: Requirements are too vague or abstract for reliable downstream verification.
 - guideline_alignment:
-  - 5: Closely follows the intended requirements-writing style with clear condition/action logic, sensible decomposition, readable sentences, explicit boolean structure when needed, and stable naming faithful to the source material.
-  - 3: Partly aligned, but has uneven wording, weak condition/action separation, unstable phrasing, or misses some important guideline expectations.
+  - 5: Closely follows the intended requirements-writing style with clear logic, readable formal phrasing, explicit conditions when needed, and stable naming faithful to the source material.
+  - 3: Partly aligned, but has uneven wording, weak logic separation, unstable phrasing, or misses some important guideline expectations.
   - 1: Poorly aligned with the intended requirements style and hard to review as formal software requirements.
 - traceability_quality:
-  - 5: Each requirement is clearly and specifically mapped back to the Epic and/or IIS with useful trace references.
-  - 3: Traceability exists but is generic, uneven, or incomplete for some requirements.
-  - 1: Traceability is weak, missing, or too vague to support review.
+  - 5: Traceability is clear, reviewable, and specific enough that a reviewer can understand where each requirement came from, even if the mapping is draft-level rather than tool-grade.
+  - 3: Traceability is present and somewhat useful, but generic, uneven, or incomplete for some requirements.
+  - 1: Traceability is weak, missing, or too vague to support meaningful review.
 - terminology_consistency:
   - 5: Uses stable, domain-accurate terminology consistently and avoids ambiguity.
-  - 3: Mostly consistent, but includes some terminology drift, unstable phrasing, or ambiguous wording.
+  - 3: Mostly consistent, but includes some terminology drift, unstable phrasing, or ambiguity.
   - 1: Inconsistent or vague wording makes interpretation unreliable.
 - overall:
-  - 5: Strong downstream requirements artifact that is suitable for review, refinement, and verification planning.
-  - 3: Usable starting point, but still needs notable cleanup or clarification before strong requirement use.
+  - 5: Strong downstream requirements draft that is suitable for review, refinement, and verification planning.
+  - 3: Usable starting point, but still needs reviewer cleanup or clarification before strong requirement use.
   - 1: Weak requirements artifact that would likely confuse review or verification work.
 
 Important evaluation rules:
-- Judge the candidate Software Requirements artifact itself, not merely its similarity to the historical reference.
-- If the historical software requirements are terse, vague, or stylistically different, do not penalize a generated output just for being clearer, more explicit, or better decomposed.
-- Use the historical software requirements mainly as a point-coverage reference: check whether historically visible requirement content is covered, not whether the wording matches.
-- Reward atomic requirements, explicit conditions, stable terminology, and test-oriented wording.
-- Penalize vague wording, requirement stuffing, weak traceability, unsupported inferred behavior, or poor alignment with the intended requirement-writing guideline.
-- Keep the evaluation grounded in the provided inputs only.
+- Judge the candidate artifact itself, not merely its wording similarity to the historical reference.
+- Use the historical software requirements mainly as a point-coverage and scope reference, not as the only valid form.
+- Reward atomic requirements, explicit conditions, stable terminology, formal wording, and test-oriented phrasing.
+- Reward sensible formalization: making implicit conditions explicit, separating combined logic, or improving readability should count positively.
+- Do not penalize a generated draft simply for being more explicit, more structured, or more review-ready than the historical reference.
+- Penalize only clearly unsupported new behavior, major boundary drift, or misleading formalization.
 - Do not reward verbosity by itself. More requirements are only better when the breakdown is justified and behaviorally distinct.
-- If a reusable scope or condition should reasonably be separated, reward outputs that split it cleanly instead of repeating it inconsistently.
-- It is acceptable to express structured conditions, reusable definitions, and explicit state-oriented logic when that matches the Epic and IIS; do not penalize this merely for being more formal.
-- If the output invents behavior that is not supported by the Epic or IIS, penalize both behavior_coverage and non-supported quality aspects through the relevant dimensions rather than excusing it as detail.
+- Keep the evaluation grounded in the provided inputs only.
 - For a historical baseline artifact, do not reward it merely for being historical; score it by the same downstream engineering-usefulness standard.
 
 Return valid JSON only with exactly this schema:
 {
   "scores": {
     "reference_alignment": 1,
-    "non_hallucination": 1,
+    "upstream_faithfulness": 1,
     "atomicity_and_breakdown": 1,
     "testability": 1,
     "guideline_alignment": 1,
@@ -93,7 +97,7 @@ Return valid JSON only with exactly this schema:
   },
   "dimension_rationales": {
     "reference_alignment": "...",
-    "non_hallucination": "...",
+    "upstream_faithfulness": "...",
     "atomicity_and_breakdown": "...",
     "testability": "...",
     "guideline_alignment": "...",
