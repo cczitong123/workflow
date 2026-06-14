@@ -768,7 +768,7 @@ def evaluate_iis_case(
 def evaluate_software_requirements_case(
     *,
     case: dict[str, Any],
-    confirmed_iis_text: str,
+    upstream_iis_text: str,
     candidate_label: str,
     candidate_software_requirements_text: str,
     app_config: AppConfig,
@@ -780,6 +780,8 @@ def evaluate_software_requirements_case(
         task_type=get_case_task_type(case),
         difficulty=get_case_difficulty(case),
         candidate_label=candidate_label,
+        description=get_case_description(case),
+        upstream_iis=upstream_iis_text or "None provided.",
         candidate_software_requirements=candidate_software_requirements_text,
         historical_software_requirements=format_list_block(get_case_historical_software_requirements(case)),
     )

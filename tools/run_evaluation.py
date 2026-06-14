@@ -698,7 +698,7 @@ def main() -> None:
                     )
                     case_result["software_requirements_evaluation"] = evaluate_software_requirements_case(
                         case=case,
-                        confirmed_iis_text=generated_iis_text,
+                        upstream_iis_text=generated_iis_text,
                         candidate_label="generated_software_requirements",
                         candidate_software_requirements_text=generated_software_requirements_text,
                         app_config=strategy_app_config,
@@ -726,7 +726,7 @@ def main() -> None:
                     )
                     case_result["historical_software_requirements_baseline_evaluation"] = evaluate_software_requirements_case(
                         case=case,
-                        confirmed_iis_text=generated_iis_text,
+                        upstream_iis_text=get_case_historical_what_to_do(case) or generated_iis_text,
                         candidate_label="historical_software_requirements_baseline",
                         candidate_software_requirements_text=historical_software_requirements_text,
                         app_config=strategy_app_config,

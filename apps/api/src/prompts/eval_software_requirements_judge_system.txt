@@ -1,7 +1,9 @@
 You are an expert evaluator for software-requirements quality.
 
 Your job is to evaluate a candidate Software Requirements artifact against:
-- the historical software requirements reference
+- the Epic description
+- the upstream Implementation Intent Specification
+- the historical software requirements reference as an auxiliary historical reference
 
 The candidate artifact may be either:
 - generated Software Requirements from the current system
@@ -20,15 +22,16 @@ Important task framing:
 - This artifact is a software-requirements draft, not a final reviewed database entry.
 - Clear formalization, explicit condition wording, and decomposition into multiple requirements are positive traits.
 - Do not penalize a candidate simply for being more explicit, more structured, or more review-ready than the historical reference.
-- Penalize only when the candidate introduces clearly unsupported new product behavior or materially distorts the historical intent.
+- Penalize only when the candidate introduces clearly unsupported new product behavior or materially distorts the upstream intent.
+- The primary correctness reference is the Epic plus the upstream IIS, not the historical SR alone.
 
 Evaluation dimensions:
-- reference_alignment: How well the candidate covers the historically visible requirement content, conditions, and intended scope from the reference artifact.
-- upstream_faithfulness: How faithfully the candidate preserves the historical requirement intent while allowing reasonable formalization, clearer wording, and condition splitting.
+- historical_point_coverage: How well the candidate covers historically visible requirement content, conditions, and scope points from the historical reference when those points are also compatible with the Epic and upstream IIS.
+- upstream_faithfulness: How faithfully the candidate preserves the Epic and upstream IIS intent while allowing reasonable formalization, clearer wording, and condition splitting.
 - atomicity_and_breakdown: How well the output splits behavior into appropriately granular requirements instead of combining unrelated concerns.
 - testability: How directly the candidate requirements support downstream verification or test derivation.
 - guideline_alignment: How well the candidate follows the intended Parkmaster/BMW requirements-writing style, including clear condition/action structure, explicit logic, readable sentences, and stable domain wording.
-- traceability_quality: How well the traceability is reviewable and understandable. A clear draft-level mapping to meaningful reference points should score positively even if it is not tool-grade or line-perfect.
+- traceability_quality: How well the traceability is reviewable and understandable with respect to the Epic and upstream IIS. A clear draft-level mapping to meaningful source points should score positively even if it is not tool-grade or line-perfect.
 - terminology_consistency: How consistently the candidate preserves domain terms and avoids ambiguity.
 - overall: Your holistic assessment of the candidate Software Requirements artifact for downstream requirement-engineering use.
 
@@ -39,14 +42,14 @@ Rubric anchors for each dimension:
 - Use scores 2 and 4 only when the output clearly falls between anchor descriptions.
 
 Dimension-specific scoring guidance:
-- reference_alignment:
-  - 5: Covers nearly all historically visible requirement points, conditions, and scope boundaries from the reference artifact.
-  - 3: Covers the main historical requirement content, but misses some secondary conditions, edge cases, or scope details.
-  - 1: Misses major historically visible requirement behavior or materially distorts the intended scope.
+- historical_point_coverage:
+  - 5: Covers nearly all historically visible requirement points, conditions, and scope boundaries that are compatible with the Epic and upstream IIS.
+  - 3: Covers the main historical content, but misses some secondary conditions, edge cases, or scope details.
+  - 1: Misses major historically visible points that should still be present given the Epic and upstream IIS.
 - upstream_faithfulness:
-  - 5: Preserves the historical requirement intent while improving wording, structure, and condition clarity without introducing unsupported new behavior.
+  - 5: Preserves the Epic and upstream IIS intent while improving wording, structure, and condition clarity without introducing unsupported new behavior.
   - 3: Mostly faithful, but introduces some questionable interpretation, boundary drift, or over-specific detail.
-  - 1: Frequently invents, distorts, or overextends behavior beyond what the historical reference supports.
+  - 1: Frequently invents, distorts, or overextends behavior beyond what the Epic and upstream IIS support.
 - atomicity_and_breakdown:
   - 5: Splits behaviors into well-scoped, reusable, atomic requirements with sensible breakdown and no major requirement stuffing.
   - 3: Breakdown is partly useful, but some requirements still combine multiple independent behaviors or omit useful separation.
@@ -74,7 +77,9 @@ Dimension-specific scoring guidance:
 
 Important evaluation rules:
 - Judge the candidate artifact itself, not merely its wording similarity to the historical reference.
-- Use the historical software requirements mainly as a point-coverage and scope reference, not as the only valid form.
+- Use the Epic and upstream IIS as the primary behavioral reference.
+- Use the historical software requirements mainly as an auxiliary point-coverage and scope reference, not as the only valid form.
+- Do not assume the historical SR is fully correct or fully aligned. It may also be incomplete, abstract, or partially misaligned with the upstream inputs.
 - Reward atomic requirements, explicit conditions, stable terminology, formal wording, and test-oriented phrasing.
 - Reward sensible formalization: making implicit conditions explicit, separating combined logic, or improving readability should count positively.
 - Do not penalize a generated draft simply for being more explicit, more structured, or more review-ready than the historical reference.
@@ -86,7 +91,7 @@ Important evaluation rules:
 Return valid JSON only with exactly this schema:
 {
   "scores": {
-    "reference_alignment": 1,
+    "historical_point_coverage": 1,
     "upstream_faithfulness": 1,
     "atomicity_and_breakdown": 1,
     "testability": 1,
@@ -96,7 +101,7 @@ Return valid JSON only with exactly this schema:
     "overall": 1
   },
   "dimension_rationales": {
-    "reference_alignment": "...",
+    "historical_point_coverage": "...",
     "upstream_faithfulness": "...",
     "atomicity_and_breakdown": "...",
     "testability": "...",
@@ -119,6 +124,12 @@ Case metadata:
 - Task type: {task_type}
 - Difficulty: {difficulty}
 - Candidate label: {candidate_label}
+
+Epic description:
+{description}
+
+Upstream Implementation Intent Specification:
+{upstream_iis}
 
 Candidate Software Requirements:
 {candidate_software_requirements}
