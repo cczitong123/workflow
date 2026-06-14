@@ -603,7 +603,8 @@ def build_eval_judge_config(app_config: AppConfig):
     base = app_config.llm_api
 
     def override(name: str, current: str) -> str:
-        return os.getenv(f"AGENTIC_WORKFLOW_EVAL_JUDGE_{name}", current)
+        value = os.getenv(f"AGENTIC_WORKFLOW_EVAL_JUDGE_{name}")
+        return value if value is not None and value.strip() else current
 
     def override_int(name: str, current: int) -> int:
         value = os.getenv(f"AGENTIC_WORKFLOW_EVAL_JUDGE_{name}")
@@ -612,6 +613,13 @@ def build_eval_judge_config(app_config: AppConfig):
     def override_float(name: str, current: float) -> float:
         value = os.getenv(f"AGENTIC_WORKFLOW_EVAL_JUDGE_{name}")
         return float(value) if value is not None and value.strip() else current
+
+    include_tuning_override = os.getenv("AGENTIC_WORKFLOW_EVAL_JUDGE_INCLUDE_TUNING_PARAMS")
+    include_tuning_params = (
+        include_tuning_override.lower() == "true"
+        if include_tuning_override is not None and include_tuning_override.strip()
+        else True
+    )
 
     return replace(
         base,
@@ -625,15 +633,15 @@ def build_eval_judge_config(app_config: AppConfig):
         auth_url=override("AUTH_URL", base.auth_url),
         client_id=override("CLIENT_ID", base.client_id),
         client_secret=override("CLIENT_SECRET", base.client_secret),
-        timeout_seconds=override_int("TIMEOUT_SECONDS", base.timeout_seconds),
+        timeout_seconds=override_int("TIMEOUT_SECONDS", max(base.timeout_seconds, 180)),
         max_retries=override_int("MAX_RETRIES", base.max_retries),
         retry_backoff_seconds=override_float(
             "RETRY_BACKOFF_SECONDS",
             base.retry_backoff_seconds,
         ),
-        include_tuning_params=override("INCLUDE_TUNING_PARAMS", str(base.include_tuning_params)).lower() == "true",
+        include_tuning_params=include_tuning_params,
         temperature=override_float("TEMPERATURE", base.temperature),
-        max_tokens=override_int("MAX_TOKENS", base.max_tokens),
+        max_tokens=override_int("MAX_TOKENS", min(base.max_tokens, 900)),
         top_p=override_float("TOP_P", base.top_p),
         presence_penalty=override_float("PRESENCE_PENALTY", base.presence_penalty),
         frequency_penalty=override_float("FREQUENCY_PENALTY", base.frequency_penalty),
@@ -749,6 +757,14 @@ def evaluate_iis_case(
         historical_changed_files=format_list_block(get_case_historical_changed_files(case)),
         notes=str(case.get("notes", "")).strip() or "None provided.",
     )
+    print(
+        "[EVAL][judge][iis] "
+        f"case={get_case_id(case)} candidate={candidate_label} "
+        f"prompt_chars={len(prompt)} timeout={judge_config.timeout_seconds}s "
+        f"include_tuning_params={judge_config.include_tuning_params} "
+        f"max_tokens={judge_config.max_tokens}",
+        flush=True,
+    )
     raw = _call_remote_chat(prompt, judge_config)
     return json.loads(raw)
 
@@ -773,6 +789,14 @@ def evaluate_software_requirements_case(
         candidate_software_requirements=candidate_software_requirements_text,
         historical_software_requirements=format_list_block(get_case_historical_software_requirements(case)),
         notes=str(case.get("notes", "")).strip() or "None provided.",
+    )
+    print(
+        "[EVAL][judge][sr] "
+        f"case={get_case_id(case)} candidate={candidate_label} "
+        f"prompt_chars={len(prompt)} timeout={judge_config.timeout_seconds}s "
+        f"include_tuning_params={judge_config.include_tuning_params} "
+        f"max_tokens={judge_config.max_tokens}",
+        flush=True,
     )
     raw = _call_remote_chat(prompt, judge_config)
     return json.loads(raw)
