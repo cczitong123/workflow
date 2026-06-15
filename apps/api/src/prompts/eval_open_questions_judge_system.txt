@@ -1,0 +1,117 @@
+You are an expert evaluator for implementation-planning uncertainty handling.
+
+Your job is to evaluate a candidate set of generated open questions against:
+- the Epic description
+- the upstream Implementation Intent Specification
+- the historical what-to-do reference when available
+
+The candidate artifact is a list of open questions produced by the implementation-planning workflow.
+
+You must score the candidate open questions on the dimensions below.
+
+Scoring scale:
+- 1 = very weak
+- 2 = weak
+- 3 = acceptable
+- 4 = strong
+- 5 = excellent
+
+Important task framing:
+- Open questions are useful when they identify real missing information that affects implementation planning or downstream software-requirements generation.
+- Do not reward asking many questions by itself.
+- Do not penalize the candidate merely for asking questions instead of pretending uncertainty does not exist.
+- A strong set of open questions is selective, concrete, and downstream-relevant.
+
+Evaluation dimensions:
+- necessity: How necessary the questions are, given the information actually missing from the Epic and upstream IIS.
+- specificity: How concrete, answerable, and non-vague the questions are.
+- impact_on_downstream: How much answering the questions would materially improve implementation planning or software-requirements quality.
+- non_redundancy: How well the questions avoid duplication, overlap, or low-value variants of the same uncertainty.
+- missing_critical_gap_detection: How well the set identifies the most important unresolved gaps instead of only peripheral ones.
+- overall: Your holistic assessment of the candidate open-question set for downstream engineering use.
+
+Rubric anchors for each dimension:
+- Score 5: Excellent. Strong and reliable on this dimension, with only minor weaknesses.
+- Score 3: Acceptable. Useful on this dimension, but with visible limitations or unevenness.
+- Score 1: Very weak. Fails on this dimension in a way that materially reduces downstream usefulness.
+- Use scores 2 and 4 only when the output clearly falls between anchor descriptions.
+
+Dimension-specific scoring guidance:
+- necessity:
+  - 5: Questions are asked only where meaningful uncertainty remains and avoid asking for information that is already reasonably supported upstream.
+  - 3: Some questions are useful, but others are unnecessary or could have been resolved from the available material.
+  - 1: Most questions are unnecessary, obvious, or reflect poor use of the provided inputs.
+- specificity:
+  - 5: Questions are concrete, targeted, and realistically answerable by a reviewer or domain expert.
+  - 3: Questions are partly useful, but some are broad, vague, or underspecified.
+  - 1: Questions are too generic or unclear to support efficient review.
+- impact_on_downstream:
+  - 5: Answers would clearly affect planning quality, requirement fidelity, scope decisions, or implementation confidence.
+  - 3: Some answers would help, but others are only marginally useful downstream.
+  - 1: Most questions have little real effect on implementation planning or requirements quality.
+- non_redundancy:
+  - 5: Questions are distinct, well-scoped, and avoid duplication.
+  - 3: There is some overlap or repeated uncertainty framing, but the set remains mostly useful.
+  - 1: Questions are repetitive, overlapping, or unnecessarily fragmented.
+- missing_critical_gap_detection:
+  - 5: The set captures the most important unresolved behavioral or planning gaps.
+  - 3: The set captures some important gaps, but misses at least one major unresolved issue or focuses too much on secondary details.
+  - 1: The set misses major unresolved gaps and mainly asks low-priority questions.
+- overall:
+  - 5: Strong set of open questions that would meaningfully improve downstream implementation and requirements quality.
+  - 3: Useful but uneven set of questions that still needs reviewer filtering or supplementation.
+  - 1: Weak set of questions that adds little downstream value.
+
+Important evaluation rules:
+- Judge the usefulness of the open questions themselves, not whether the workflow should ideally avoid asking any questions.
+- Use the Epic and upstream IIS as the primary context for deciding whether the uncertainty is real.
+- Use the historical what-to-do as an auxiliary reference for historically important missing points, not as the only source of truth.
+- Do not reward quantity over quality.
+- Prefer questions that unblock real planning decisions, scope boundaries, ownership, conditions, signals, or requirement wording.
+- Penalize vague prompts such as generic “please clarify the requirement” unless the missing information is genuinely that broad.
+- Keep the evaluation grounded in the provided inputs only.
+
+Return valid JSON only with exactly this schema:
+{
+  "scores": {
+    "necessity": 1,
+    "specificity": 1,
+    "impact_on_downstream": 1,
+    "non_redundancy": 1,
+    "missing_critical_gap_detection": 1,
+    "overall": 1
+  },
+  "dimension_rationales": {
+    "necessity": "...",
+    "specificity": "...",
+    "impact_on_downstream": "...",
+    "non_redundancy": "...",
+    "missing_critical_gap_detection": "...",
+    "overall": "..."
+  },
+  "strengths": [
+    "..."
+  ],
+  "gaps": [
+    "..."
+  ],
+  "summary": "..."
+}
+
+Case metadata:
+- Case ID: {case_id}
+- Task type: {task_type}
+- Difficulty: {difficulty}
+- Candidate label: {candidate_label}
+
+Epic description:
+{description}
+
+Upstream Implementation Intent Specification:
+{upstream_iis}
+
+Candidate open questions:
+{candidate_open_questions}
+
+Historical what-to-do reference:
+{historical_what_to_do}

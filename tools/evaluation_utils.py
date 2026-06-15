@@ -201,6 +201,32 @@ def format_evidence_block(items: list[dict[str, Any]] | None, empty_label: str =
     return "\n".join(lines)
 
 
+def format_open_questions_block(
+    items: list[dict[str, Any]] | None,
+    empty_label: str = "None provided.",
+) -> str:
+    if not items:
+        return empty_label
+    lines: list[str] = []
+    for item in items:
+        oq_id = str(item.get("id", "")).strip() or "unknown-id"
+        question = str(item.get("question", "")).strip()
+        reason = str(item.get("reason", "")).strip()
+        status = str(item.get("status", "")).strip()
+        answer = str(item.get("answer", "")).strip() if item.get("answer") is not None else ""
+        parts = [f"id={oq_id}"]
+        if status:
+            parts.append(f"status={status}")
+        if question:
+            parts.append(f"question={question}")
+        if reason:
+            parts.append(f"reason={reason}")
+        if answer:
+            parts.append(f"answer={answer}")
+        lines.append("- " + " | ".join(parts))
+    return "\n".join(lines)
+
+
 def normalize_path_for_eval(path: str) -> str:
     return str(path).strip().replace("\\", "/").lower()
 
@@ -787,6 +813,38 @@ def evaluate_software_requirements_case(
     )
     print(
         "[EVAL][judge][sr] "
+        f"case={get_case_id(case)} candidate={candidate_label} "
+        f"prompt_chars={len(prompt)} timeout={judge_config.timeout_seconds}s "
+        f"include_tuning_params={judge_config.include_tuning_params} "
+        f"max_tokens={judge_config.max_tokens}",
+        flush=True,
+    )
+    raw = _call_remote_chat(prompt, judge_config)
+    return json.loads(raw)
+
+
+def evaluate_open_questions_case(
+    *,
+    case: dict[str, Any],
+    candidate_label: str,
+    upstream_iis_text: str,
+    open_questions: list[dict[str, Any]],
+    app_config: AppConfig,
+) -> dict[str, Any]:
+    judge_config = build_eval_judge_config(app_config)
+    prompt = render_prompt(
+        "eval_open_questions_judge_system",
+        case_id=get_case_id(case),
+        task_type=get_case_task_type(case),
+        difficulty=get_case_difficulty(case),
+        candidate_label=candidate_label,
+        description=get_case_description(case),
+        upstream_iis=upstream_iis_text or "None provided.",
+        candidate_open_questions=format_open_questions_block(open_questions),
+        historical_what_to_do=get_case_historical_what_to_do(case) or "None provided.",
+    )
+    print(
+        "[EVAL][judge][oq] "
         f"case={get_case_id(case)} candidate={candidate_label} "
         f"prompt_chars={len(prompt)} timeout={judge_config.timeout_seconds}s "
         f"include_tuning_params={judge_config.include_tuning_params} "
